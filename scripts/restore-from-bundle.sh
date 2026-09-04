@@ -4,8 +4,8 @@ set -euo pipefail
 
 BUNDLE="${1:-artifacts/gnkalgo-platform.bundle}"
 TARGET_DIR="${2:-gnkalgo-restore}"
-BRANCH="${BRANCH:-cursor/gnkalgo-platform-1a67}"
-REMOTE="${REMOTE:-https://github.com/riyazgagguturi-design/gnkalgo_Dev.git}"
+BRANCH="${BRANCH:-main}"
+REMOTE="${REMOTE:-https://github.com/griyaz/GnKAlgo.git}"
 
 if [[ ! -f "$BUNDLE" ]]; then
   echo "Bundle not found: $BUNDLE" >&2

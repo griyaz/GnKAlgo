@@ -43,8 +43,8 @@ Strategies → **Strategy builder**:
 
 Manual **Run once** still works anytime.
 
-## 6. Merge the GitHub PR
+## 6. Deploy from GitHub (production)
 
-https://github.com/riyazgagguturi-design/gnkalgo_Dev/compare/main...cursor/gnkalgo-platform-1a67
+Repo: https://github.com/griyaz/GnKAlgo
 
-After merge, the server can `git pull origin main`.
+Production deploys from `main`. On the server: `git pull origin main`.

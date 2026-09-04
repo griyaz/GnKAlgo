@@ -23,5 +23,5 @@ Upgrades GnKAlgo in place: trading terminal UI, live Dhan market data, instrumen
 
 ```bash
 cd /opt/gnkalgo
-BRANCH=cursor/gnkalgo-platform-1a67 ./scripts/update-oracle-vm.sh update
+./scripts/update-oracle-vm.sh update
 ```

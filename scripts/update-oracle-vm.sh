@@ -20,12 +20,12 @@ Commands:
 
 Environment overrides:
   REPO_DIR=/opt/gnkalgo
-  BRANCH=main|cursor/gnkalgo-platform-1a67
+  BRANCH=main
   COMPOSE_FILE=docker-compose.prod.yml
 
 Examples:
   cd /opt/gnkalgo
-  BRANCH=cursor/gnkalgo-platform-1a67 ./scripts/update-oracle-vm.sh update
+  ./scripts/update-oracle-vm.sh update
   ./scripts/update-oracle-vm.sh start
   ./scripts/update-oracle-vm.sh stop
 EOF

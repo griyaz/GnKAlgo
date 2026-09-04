@@ -2,9 +2,9 @@
 # Push branch and open a draft PR to main (run where GitHub is reachable).
 set -euo pipefail
 
-BRANCH="${BRANCH:-cursor/gnkalgo-platform-1a67}"
+BRANCH="${BRANCH:-main}"
 BASE="${BASE:-main}"
-REPO="${GITHUB_REPO:-riyazgagguturi-design/gnkalgo_Dev}"
+REPO="${GITHUB_REPO:-griyaz/GnKAlgo}"
 
 if [[ -z "${GH_TOKEN:-}" ]]; then
   echo "Set GH_TOKEN to a GitHub PAT with repo scope." >&2
