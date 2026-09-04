@@ -7,6 +7,10 @@
       "command": "cd backend && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     },
     {
+      "name": "ml-service",
+      "command": "cd ml-service && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload"
+    },
+    {
       "name": "frontend",
       "command": "npm run dev --prefix frontend"
     }
