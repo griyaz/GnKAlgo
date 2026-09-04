@@ -204,7 +204,11 @@ app.add_middleware(SlowAPIMiddleware)
 @app.middleware("http")
 async def csrf_protection(request: Request, call_next):
     csrf_exempt = {"/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password", "/api/v1/auth/verify-email", "/v1/auth/login", "/v1/auth/register", "/v1/auth/forgot-password", "/v1/auth/reset-password", "/v1/auth/verify-email"}
-    if not request.headers.get("Authorization") and request.url.path not in csrf_exempt and request.method in {"POST", "PUT", "PATCH", "DELETE"} and (
+    # Inbound webhooks are machine-to-machine (HMAC + token auth), not browser
+    # session requests, so CSRF must not apply — let the endpoint's own auth run.
+    csrf_exempt_prefixes = ("/api/v1/webhooks/in/", "/v1/webhooks/in/")
+    path = request.url.path
+    if not request.headers.get("Authorization") and path not in csrf_exempt and not path.startswith(csrf_exempt_prefixes) and request.method in {"POST", "PUT", "PATCH", "DELETE"} and (
         request.cookies.get("gnk_access") or request.cookies.get("gnk_refresh")
     ):
         cookie_token = request.cookies.get("gnk_csrf")
