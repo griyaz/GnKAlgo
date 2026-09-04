@@ -54,10 +54,9 @@ MARKET_DATA_SYMBOL_OVERRIDES=       # JSON, see "Symbol mapping"
 
 ### FYERS setup (primary)
 
-1. Install the SDK (kept out of the default image because of heavy deps):
-   ```bash
-   pip install fyers-apiv3            # or: pip install -r backend/requirements-market.txt
-   ```
+1. The SDK (`fyers-apiv3`) is already bundled in `backend/requirements.txt`, so
+   no extra install is needed. It is imported lazily (only when
+   `MARKET_DATA_PROVIDER=fyers`), so it never affects mock mode or tests.
 2. Generate a v3 access token (app id + auth code flow) and set:
    ```env
    MARKET_DATA_PROVIDER=fyers
@@ -211,8 +210,7 @@ proxied by nginx.
 ```bash
 cd /opt/gnkalgo
 git pull origin main
-# For FYERS: pip is inside the backend image; add fyers-apiv3 to the image or
-# backend/requirements.txt if you want it baked in, then:
+# The FYERS SDK is bundled in backend/requirements.txt, so a rebuild installs it:
 docker compose -f docker-compose.prod.yml up -d --build
 sudo cp deploy/nginx/www.gnkalgo.com.conf /etc/nginx/sites-available/
 sudo nginx -t && sudo systemctl reload nginx   # picks up the new /ws/ proxy
