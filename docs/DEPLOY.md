@@ -23,9 +23,9 @@ Use a cheap VPS in India (Mumbai/Bangalore) and a subdomain:
 On the server:
 
 ```bash
-git clone git@github.com:riyazgagguturi-design/gnkalgo_Dev.git
-cd gnkalgo_Dev
-git checkout cursor/gnkalgo-platform-1a67
+git clone git@github.com:griyaz/GnKAlgo.git
+cd GnKAlgo
+git checkout main
 cp .env.production.example .env
 # edit .env: SECRET_KEY, POSTGRES_PASSWORD, SMTP_*, FRONTEND_URL, NEXT_PUBLIC_API_URL
 docker compose -f docker-compose.prod.yml up -d --build

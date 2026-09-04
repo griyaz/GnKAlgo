@@ -1,7 +1,7 @@
 # Mirror GnKAlgo to GitLab
 
 **GitLab project:** https://gitlab.com/gnk-algo-trade-group/gnk-algo-trade-project  
-**GitHub source:** `riyazgagguturi-design/gnkalgo_Dev`
+**GitHub source:** `griyaz/GnKAlgo`
 
 ---
 
@@ -47,7 +47,7 @@ chmod +x scripts/mirror-to-gitlab.sh
 Or manually:
 
 ```bash
-git clone --mirror git@github.com:riyazgagguturi-design/gnkalgo_Dev.git /tmp/gnkalgo-mirror
+git clone --mirror git@github.com:griyaz/GnKAlgo.git /tmp/gnkalgo-mirror
 cd /tmp/gnkalgo-mirror
 git push --mirror git@gitlab.com:gnk-algo-trade-group/gnk-algo-trade-project.git
 ```
@@ -64,7 +64,7 @@ git push gitlab --all
 git push gitlab --tags
 ```
 
-**Main development branch:** `cursor/gnkalgo-platform-1a67`
+**Main branch:** `main`
 
 ---
 
@@ -73,7 +73,7 @@ git push gitlab --tags
 ```bash
 git clone git@gitlab.com:gnk-algo-trade-group/gnk-algo-trade-project.git
 cd gnk-algo-trade-project
-git checkout cursor/gnkalgo-platform-1a67
+git checkout main
 ```
 
 HTTPS:

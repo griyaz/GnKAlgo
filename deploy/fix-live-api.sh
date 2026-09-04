@@ -4,8 +4,8 @@ set -euo pipefail
 cd /opt/gnkalgo
 
 git fetch origin
-git checkout cursor/gnkalgo-platform-1a67
-git pull origin cursor/gnkalgo-platform-1a67
+git checkout main
+git pull origin main
 
 if [ -f .env ]; then
   sed -i 's|^NEXT_PUBLIC_API_URL=.*|NEXT_PUBLIC_API_URL=|' .env

@@ -5,8 +5,8 @@ cd /opt/gnkalgo
 
 echo "==> Pull latest code"
 git fetch origin
-git checkout cursor/gnkalgo-platform-1a67
-git pull origin cursor/gnkalgo-platform-1a67
+git checkout main
+git pull origin main
 
 echo "==> Update Nginx (proxy /api, /health, /docs to backend)"
 sudo cp deploy/nginx/www.gnkalgo.com.conf /etc/nginx/sites-available/www.gnkalgo.com.conf

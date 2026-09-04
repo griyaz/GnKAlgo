@@ -3,7 +3,7 @@
 set -euo pipefail
 
 GITLAB_REPO="${GITLAB_REPO:-git@gitlab.com:gnk-algo-trade-group/gnk-algo-trade-project.git}"
-GITHUB_REPO="${GITHUB_REPO:-git@github.com:riyazgagguturi-design/gnkalgo_Dev.git}"
+GITHUB_REPO="${GITHUB_REPO:-git@github.com:griyaz/GnKAlgo.git}"
 WORKDIR="${WORKDIR:-/tmp/gnkalgo-mirror-$$}"
 
 echo "==> Mirror: $GITHUB_REPO -> $GITLAB_REPO"

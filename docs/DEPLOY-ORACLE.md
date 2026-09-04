@@ -19,7 +19,7 @@ Docker binds only to `127.0.0.1`. Do **not** open 3000/8000 on the internet.
 
 - Oracle Cloud account (Always Free is enough: 1× Ampere or AMD VM)
 - Domain `gnkalgo.com` in Cloudflare
-- GitHub access to `riyazgagguturi-design/gnkalgo_Dev`
+- GitHub access to `griyaz/GnKAlgo`
 - SMTP mailbox (`noreply@gnkalgo.com`)
 - SSH key pair on your laptop/phone (or Oracle Cloud Shell)
 
@@ -133,7 +133,7 @@ cd /opt
 sudo mkdir -p /opt/gnkalgo
 sudo chown ubuntu:ubuntu /opt/gnkalgo
 cd /opt/gnkalgo
-git clone -b cursor/gnkalgo-platform-1a67 https://github.com/riyazgagguturi-design/gnkalgo_Dev.git .
+git clone -b main https://github.com/griyaz/GnKAlgo.git .
 cp .env.production.example .env
 nano .env
 ```
@@ -256,7 +256,7 @@ If register shows **Failed to fetch**, the browser could not reach the API (ofte
 
 ```bash
 cd /opt/gnkalgo
-git pull origin cursor/gnkalgo-platform-1a67
+git pull origin main
 sudo cp deploy/nginx/www.gnkalgo.com.conf /etc/nginx/sites-available/
 sudo nginx -t && sudo systemctl reload nginx
 docker compose -f docker-compose.prod.yml up -d --build
@@ -293,7 +293,7 @@ Then recreate backend and rebuild frontend. Log in once so that email becomes ad
 
 ```bash
 cd /opt/gnkalgo
-git pull origin cursor/gnkalgo-platform-1a67
+git pull origin main
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 BUNDLE="${1:?Usage: sync-from-bundle.sh /path/to/gnkalgo-platform.bundle}"
-BRANCH="${BRANCH:-cursor/gnkalgo-platform-1a67}"
+BRANCH="${BRANCH:-main}"
 REPO_DIR="${REPO_DIR:-$(git rev-parse --show-toplevel)}"
 
 if [[ ! -f "$BUNDLE" ]]; then

@@ -1,8 +1,8 @@
 # GnKAlgo — E2E Flow, Design, URLs, Database & Operations
 
 **Product:** https://www.gnkalgo.com  
-**Repo:** `riyazgagguturi-design/gnkalgo_Dev`  
-**Branch:** `cursor/gnkalgo-platform-1a67`
+**Repo:** `griyaz/GnKAlgo`  
+**Branch:** `main`
 
 ---
 
@@ -451,7 +451,7 @@ docker compose -f docker-compose.prod.yml up -d frontend
 
 ```bash
 cd /opt/gnkalgo
-git pull origin cursor/gnkalgo-platform-1a67
+git pull origin main
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
