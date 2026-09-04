@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on the Oracle VM after git clone. Stops the site calling api-dev.gnkalgo.com.
+# Run on the Oracle VM after git clone. Ensures the site calls /api on the same host (www.gnkalgo.com).
 set -euo pipefail
 cd /opt/gnkalgo
 

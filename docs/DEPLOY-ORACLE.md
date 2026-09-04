@@ -1,7 +1,6 @@
 # Deploy GnKAlgo on Oracle Cloud (Ubuntu 24.04) + Nginx + Cloudflare
 
-Use this for **developer production** (`dev.gnkalgo.com`) or live (`www.gnkalgo.com`).  
-Replace hostnames if you start with `dev` / `api-dev`.
+Use this for production (`www.gnkalgo.com` + `api.gnkalgo.com`).
 
 Traffic path:
 
@@ -59,8 +58,6 @@ Oracle images also filter with `iptables`. After SSH (step 3), open 80/443 on th
    | A | `@` | Oracle public IP |
    | A | `www` | Oracle public IP |
    | A | `api` | Oracle public IP |
-
-   For staging, use `dev` and `api-dev` instead of `www` / `api`.
 
 3. **SSL/TLS → Overview**: set **Full (strict)** after origin certs are installed (step 7).  
    Until then you can use **Flexible** (HTTP to origin only). Prefer Full (strict).
@@ -163,7 +160,7 @@ SMTP_PASSWORD=<mailbox password>
 SMTP_FROM=noreply@gnkalgo.com
 ```
 
-For **dev** staging, use `https://dev.gnkalgo.com`. Leave `NEXT_PUBLIC_API_URL` empty so the browser calls `/api` on the same host.
+Leave `NEXT_PUBLIC_API_URL` empty so the browser calls `/api` on the same host (`www.gnkalgo.com`).
 
 `NEXT_PUBLIC_API_URL` is baked into the frontend **at Docker build time**. If you change it later, rebuild:
 
@@ -204,8 +201,6 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl reload nginx
 ```
-
-For `dev` / `api-dev`, copy those files and change `server_name`.
 
 If origin certs are not ready yet, comment out the `listen 443` server blocks and use Cloudflare **Flexible** temporarily.
 
@@ -308,8 +303,8 @@ docker compose -f docker-compose.prod.yml up -d --build
 | 525 SSL handshake | Wrong origin cert/key, or Full vs Flexible mismatch |
 | Email not arriving | SMTP in `.env`, restart `backend` container |
 | CORS errors | `ALLOWED_ORIGINS` must include exact `https://www.gnkalgo.com` |
-| **Failed to fetch / ERR_NAME_NOT_RESOLVED** | Do not use `api-dev.gnkalgo.com` unless that DNS A record exists. Leave `NEXT_PUBLIC_API_URL` empty. Register from https://www.gnkalgo.com so the browser calls `/api/v1/...` on the same host. |
-| **Verify link goes to dev.gnkalgo.com** | Set `FRONTEND_URL=https://www.gnkalgo.com` in `.env`, then `docker compose -f docker-compose.prod.yml up -d --force-recreate backend`. Open the same token on https://www.gnkalgo.com/verify-email?token=... |
+| **Failed to fetch / ERR_NAME_NOT_RESOLVED** | Leave `NEXT_PUBLIC_API_URL` empty and register from https://www.gnkalgo.com so the browser calls `/api/v1/...` on the same host. |
+| **Verify link points to the wrong host** | Set `FRONTEND_URL=https://www.gnkalgo.com` in `.env`, then `docker compose -f docker-compose.prod.yml up -d --force-recreate backend`. Open the same token on https://www.gnkalgo.com/verify-email?token=... |
 | **Method Not Allowed** on `/auth/register` | Opening the URL in a browser sends **GET**. Register is **POST** only. Use the Create account form, not the address bar. |
 | Old API URL in browser | Rebuild frontend image after changing `NEXT_PUBLIC_API_URL` |
 | `Permission denied` git clone | Use HTTPS + PAT, or add a deploy SSH key on the VM |

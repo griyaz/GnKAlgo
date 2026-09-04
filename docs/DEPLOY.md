@@ -1,6 +1,6 @@
 # Deploy GnKAlgo
 
-You can go live in two stages. Use **developer production (staging)** first. Use **www.gnkalgo.com** only after SMTP, Postgres, HTTPS, and secrets are real.
+Go live on **www.gnkalgo.com** once SMTP, Postgres, HTTPS, and secrets are real.
 
 This cloud agent cannot attach your domain by itself. You need a VPS or a host (Hetzner, AWS Mumbai, DigitalOcean, Render, Railway).
 
@@ -8,17 +8,17 @@ This cloud agent cannot attach your domain by itself. You need a VPS or a host (
 
 | Item | Status |
 |------|--------|
-| App (auth, dashboard, paper orders, webhooks, AI stub) | Ready for staging |
+| App (auth, dashboard, paper orders, webhooks, AI stub) | Ready |
 | Docker production compose | `docker-compose.prod.yml` |
 | Live Dhan/Groww orders | Needs broker keys + Dhan static IP |
 | Custom domain + TLS | You must point DNS and add HTTPS (Caddy/Nginx/Cloudflare) |
 
-## Option A — Developer production (recommended next)
+## Option A — Self-hosted VPS (recommended)
 
-Use a cheap VPS in India (Mumbai/Bangalore) and a subdomain:
+Use a VPS in India (Mumbai/Bangalore):
 
-- App: `https://dev.gnkalgo.com`
-- API: `https://api-dev.gnkalgo.com`
+- App: `https://www.gnkalgo.com`
+- API: `https://api.gnkalgo.com`
 
 On the server:
 
@@ -37,7 +37,7 @@ Put Cloudflare or Caddy in front for HTTPS. Point DNS A records to the VPS publi
 
 ## Option B — Public production (`www.gnkalgo.com`)
 
-Do this after staging works:
+Production checklist:
 
 1. Postgres (not SQLite)
 2. Strong `SECRET_KEY` and `ENCRYPTION_KEY`
@@ -53,14 +53,14 @@ Do this after staging works:
 - **Frontend:** Vercel/Netlify, env `NEXT_PUBLIC_API_URL`
 - **Backend + ML + Postgres + Redis:** Render, Railway, or Fly.io in `ap-south-1` if available
 
-## Local vs staging vs live
+## Local vs production
 
-| | Local | Developer production | Live |
-|--|-------|----------------------|------|
-| URL | localhost:3000 | dev.gnkalgo.com | www.gnkalgo.com |
-| DB | SQLite | Postgres | Postgres |
-| Orders | Paper | Paper + test brokers | Live brokers |
-| Email | Link on screen until SMTP | Real SMTP | Real SMTP |
+| | Local | Production |
+|--|-------|------------|
+| URL | localhost:3000 | www.gnkalgo.com |
+| DB | SQLite | Postgres |
+| Orders | Paper | Live brokers |
+| Email | Link on screen until SMTP | Real SMTP |
 
 ## After deploy, smoke test
 
