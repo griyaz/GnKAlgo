@@ -19,6 +19,8 @@ from app.api.admin import router as admin_router
 from app.api.auth import brokers_router, router as auth_router
 from app.api.billing import router as billing_router
 from app.api.dashboard import router as dashboard_router
+from app.api.market_ticker import router as market_ticker_router
+from app.api.market_ticker import ws_router as market_ticker_ws_router
 from app.api.orders import router as orders_router
 from app.api.signals import router as signals_router
 from app.api.strategies import router as strategies_router
@@ -154,7 +156,14 @@ async def lifespan(app: FastAPI):
     scheduler_task = start_strategy_scheduler()
     billing_task = start_billing_scheduler()
     instrument_task = start_instrument_scheduler() if settings.instrument_sync_enabled else None
+
+    from app.market_data.manager import market_manager
+
+    market_manager.start()
+
     yield
+
+    await market_manager.stop()
     scheduler_task.cancel()
     billing_task.cancel()
     if instrument_task:
@@ -228,6 +237,10 @@ for prefix in (API_PREFIX, "/v1"):
     app.include_router(portfolio_router, prefix=prefix)
     app.include_router(profile_router, prefix=prefix)
     app.include_router(news_router, prefix=prefix)
+    app.include_router(market_ticker_router, prefix=prefix)
+
+# Internal ticker WebSocket lives at the app root: /ws/market/ticker
+app.include_router(market_ticker_ws_router)
 
 
 @app.get("/api/v1")
