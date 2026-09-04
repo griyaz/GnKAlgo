@@ -1,0 +1,16 @@
+# Optional market-data provider SDKs for the LiveMarketTicker.
+# These are NOT installed by default because they pull heavy, tightly-pinned
+# transitive dependencies. Install only for the provider(s) you actually use:
+#
+#   pip install -r backend/requirements-market.txt          # both
+#   pip install fyers-apiv3                                  # FYERS only
+#   pip install upstox-python-sdk                            # Upstox V3 only
+#
+# The provider modules import these lazily, so the core backend runs (and all
+# tests pass, incl. MARKET_DATA_MOCK_MODE) without them.
+
+# FYERS API v3 (primary provider). See docs/LIVE_MARKET_TICKER.md.
+fyers-apiv3==3.1.16
+
+# Upstox Market Data Feed V3 (optional fallback).
+upstox-python-sdk==2.15.0

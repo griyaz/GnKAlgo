@@ -60,6 +60,44 @@ class Settings(BaseSettings):
     finnhub_api_key: str = ""
     finnhub_base_url: str = "https://finnhub.io/api/v1"
 
+    # ------------------------------------------------------------------
+    # Live market ticker (LiveMarketTicker) — see docs/LIVE_MARKET_TICKER.md
+    # ------------------------------------------------------------------
+    # Primary upstream provider for the index ticker feed: fyers | dhan | upstox | mock
+    market_data_provider: str = "fyers"
+    # Only switch to a fallback provider when the primary is unavailable AND this is true.
+    market_data_failover_enabled: bool = False
+    # Mark a tick stale when no upstream update arrives within this many seconds (market open).
+    market_data_stale_seconds: int = 10
+    # Deterministic demo feed for local dev/tests. Never a silent production fallback.
+    market_data_mock_mode: bool = False
+    # Redis TTL for cached ticker snapshots while the market is open (seconds).
+    market_data_cache_ttl_seconds: int = 60
+    # Require an authenticated GnKAlgo session to open the ticker WebSocket.
+    market_data_require_auth: bool = True
+    # Comma-separated NSE holiday dates (YYYY-MM-DD, Asia/Kolkata) treated as HOLIDAY.
+    market_holidays: str = ""
+    # Optional JSON overrides for per-provider index symbols. See symbols.py.
+    # e.g. {"NIFTY50": {"fyers": "NSE:NIFTY50-INDEX", "dhan": "IDX_I:13"}}
+    market_data_symbol_overrides: str = ""
+
+    # FYERS API v3 (primary). Backend-only — never expose via NEXT_PUBLIC_*.
+    fyers_client_id: str = ""
+    fyers_access_token: str = ""
+
+    # Dhan market feed (optional fallback). Separate from Dhan execution/orders.
+    dhan_market_data_enabled: bool = False
+    dhan_client_id: str = ""
+    dhan_access_token: str = ""
+
+    # Upstox Market Data Feed V3 (optional fallback).
+    upstox_market_data_enabled: bool = False
+    upstox_access_token: str = ""
+
+    @property
+    def market_holiday_set(self) -> set[str]:
+        return {d.strip() for d in self.market_holidays.split(",") if d.strip()}
+
     @property
     def admin_email_list(self) -> list[str]:
         return [e.strip().lower() for e in self.admin_emails.split(",") if e.strip()]

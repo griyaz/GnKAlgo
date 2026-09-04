@@ -1,7 +1,7 @@
 "use client";
 
 import { Logo } from "@/components/Logo";
-import { MarketTicker } from "@/components/market/MarketTicker";
+import { LiveMarketTicker } from "@/components/market/LiveMarketTicker";
 import { UserMenu } from "@/components/layout/UserMenu";
 
 export function TradingHeader() {
@@ -14,7 +14,7 @@ export function TradingHeader() {
           <UserMenu />
         </div>
       </div>
-      <MarketTicker />
+      <LiveMarketTicker />
     </header>
   );
 }
