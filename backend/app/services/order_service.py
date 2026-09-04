@@ -76,7 +76,9 @@ class OrderService:
             control = await db.get(TradingControl, 1)
             if not control or control.kill_switch_active:
                 return await self._reject(db, user, data, "Emergency kill switch is active", strategy_id, webhook_id, source)
-            if data.live_confirmation != "CONFIRM LIVE ORDER":
+            # Typed confirmation is a UI guard against accidental clicks. Webhooks and
+            # scheduled strategies are already authorized by HMAC / strategy config.
+            if source == "manual" and data.live_confirmation != "CONFIRM LIVE ORDER":
                 return await self._reject(db, user, data, "Type CONFIRM LIVE ORDER to authorize this live order", strategy_id, webhook_id, source)
             if data.broker == "dhan" and not settings.dhan_static_ip.strip():
                 return await self._reject(db, user, data, "Dhan static public IP is not configured and allowlisting is unverified", strategy_id, webhook_id, source)

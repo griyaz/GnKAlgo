@@ -192,10 +192,30 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 
+def _csrf_exempt(path: str) -> bool:
+    exact = {
+        "/api/v1/auth/login",
+        "/api/v1/auth/register",
+        "/api/v1/auth/forgot-password",
+        "/api/v1/auth/reset-password",
+        "/api/v1/auth/verify-email",
+        "/v1/auth/login",
+        "/v1/auth/register",
+        "/v1/auth/forgot-password",
+        "/v1/auth/reset-password",
+        "/v1/auth/verify-email",
+    }
+    if path in exact:
+        return True
+    # Inbound webhooks authenticate with HMAC + shared secret, not cookies.
+    # Cookie CSRF would 403 any caller that happens to send a session cookie
+    # (browser testers, TestClient) before HMAC is checked.
+    return path.startswith("/api/v1/webhooks/in/") or path.startswith("/v1/webhooks/in/")
+
+
 @app.middleware("http")
 async def csrf_protection(request: Request, call_next):
-    csrf_exempt = {"/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password", "/api/v1/auth/verify-email", "/v1/auth/login", "/v1/auth/register", "/v1/auth/forgot-password", "/v1/auth/reset-password", "/v1/auth/verify-email"}
-    if not request.headers.get("Authorization") and request.url.path not in csrf_exempt and request.method in {"POST", "PUT", "PATCH", "DELETE"} and (
+    if not request.headers.get("Authorization") and not _csrf_exempt(request.url.path) and request.method in {"POST", "PUT", "PATCH", "DELETE"} and (
         request.cookies.get("gnk_access") or request.cookies.get("gnk_refresh")
     ):
         cookie_token = request.cookies.get("gnk_csrf")
