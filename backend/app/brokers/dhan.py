@@ -70,8 +70,10 @@ class DhanAdapter(BrokerAdapter):
     @staticmethod
     def order_payload(order: OrderRequest) -> dict:
         product = order.product_type.upper()
+        # DhanHQ v2 wire values are CNC / INTRADAY / MARGIN / MTF / CO / BO.
+        # The official SDK constant is named INTRA but serializes as "INTRADAY".
         if product in ("INTRADAY", "INTRA"):
-            product = "INTRA"
+            product = "INTRADAY"
         elif product in ("CNC", "DELIVERY"):
             product = "CNC"
         return {
