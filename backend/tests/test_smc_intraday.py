@@ -60,3 +60,18 @@ def test_smc_create_rules_json():
     assert "smc_intraday" in rules
     assert "order_block" in rules
     assert '"qty":2' in rules.replace(" ", "")
+
+
+def test_build_rules_json_rejects_invalid_payload():
+    import pytest
+    from app.schemas.trading import StrategyCreateRequest
+    from app.services.strategy_service import build_rules_json, parse_rules
+
+    with pytest.raises(ValueError, match="Invalid rules_json"):
+        build_rules_json(StrategyCreateRequest(name="Bad", rules_json="not-json"))
+
+    with pytest.raises(ValueError, match="JSON object"):
+        parse_rules("[1, 2, 3]")
+
+    with pytest.raises(ValueError, match="qty"):
+        parse_rules('{"action": "BUY", "qty": "abc"}')

@@ -120,3 +120,187 @@ def test_scheduled_runner_executes():
 
         last = asyncio.run(check_last_run())
         assert last is not None
+
+
+def test_create_rejects_invalid_rules_json():
+    with TestClient(app) as client:
+        access = _register_login(client, f"badrules-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+        created = client.post(
+            "/api/v1/strategies/",
+            headers={"Authorization": f"Bearer {access}"},
+            json={"name": "Corrupt", "rules_json": "not-json", "paper_mode": True},
+        )
+        assert created.status_code == 400
+        assert "rules_json" in created.json()["detail"]
+
+
+def test_scheduled_runner_isolates_crash_from_sibling_strategy():
+    """A crash in strategy B must not roll back A after A already placed an order."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import Strategy, StrategyRun
+    from app.services.strategy_service import StrategyService, strategy_service
+
+    with TestClient(app) as client:
+        access = _register_login(client, f"iso-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+        auth = {"Authorization": f"Bearer {access}"}
+        good = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Good",
+                "symbol": "TCS",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "schedule_enabled": True,
+                "interval_minutes": 1,
+            },
+        )
+        bad = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Bad",
+                "symbol": "INFY",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "schedule_enabled": True,
+                "interval_minutes": 1,
+            },
+        )
+        good_id = uuid.UUID(good.json()["id"])
+        bad_id = uuid.UUID(bad.json()["id"])
+        stale = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+        async def force_due():
+            async with AsyncSessionLocal() as session:
+                for sid in (good_id, bad_id):
+                    result = await session.execute(select(Strategy).where(Strategy.id == sid))
+                    result.scalar_one().last_scheduled_run_at = stale
+                await session.commit()
+
+        import asyncio
+
+        asyncio.run(force_due())
+
+        original = StrategyService.run_once
+
+        async def flaky(self, db, user, strategy_id, scheduled=False):
+            if strategy_id == bad_id:
+                raise RuntimeError("simulated scheduled-run crash")
+            return await original(self, db, user, strategy_id, scheduled)
+
+        StrategyService.run_once = flaky
+        try:
+            async def run_scheduler():
+                async with AsyncSessionLocal() as session:
+                    return await strategy_service.run_due_scheduled(session)
+
+            ran = asyncio.run(run_scheduler())
+        finally:
+            StrategyService.run_once = original
+
+        assert ran == 2
+
+        async def load_state():
+            async with AsyncSessionLocal() as session:
+                good_row = (await session.execute(select(Strategy).where(Strategy.id == good_id))).scalar_one()
+                bad_row = (await session.execute(select(Strategy).where(Strategy.id == bad_id))).scalar_one()
+                runs = list(
+                    (
+                        await session.execute(
+                            select(StrategyRun).where(StrategyRun.strategy_id.in_((good_id, bad_id)))
+                        )
+                    ).scalars()
+                )
+                return good_row.last_scheduled_run_at, bad_row.last_scheduled_run_at, runs
+
+        good_last, bad_last, runs = asyncio.run(load_state())
+        assert good_last is not None and good_last.year != 2020
+        assert bad_last is not None and bad_last.year != 2020
+        assert any(run.strategy_id == good_id for run in runs)
+        assert any(run.strategy_id == bad_id and run.status == "FAILED" for run in runs)
+
+
+def test_scheduled_runner_continues_after_corrupt_rules():
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import Strategy, StrategyRun
+    from app.services.strategy_service import strategy_service
+
+    with TestClient(app) as client:
+        access = _register_login(client, f"corrupt-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+        auth = {"Authorization": f"Bearer {access}"}
+        good = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Healthy",
+                "symbol": "TCS",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "schedule_enabled": True,
+                "interval_minutes": 1,
+            },
+        )
+        bad = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Poison",
+                "symbol": "INFY",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "schedule_enabled": True,
+                "interval_minutes": 1,
+            },
+        )
+        good_id = uuid.UUID(good.json()["id"])
+        bad_id = uuid.UUID(bad.json()["id"])
+        stale = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+        async def poison_and_force_due():
+            async with AsyncSessionLocal() as session:
+                bad_row = (await session.execute(select(Strategy).where(Strategy.id == bad_id))).scalar_one()
+                bad_row.rules_json = "not-json"
+                for sid in (good_id, bad_id):
+                    row = (await session.execute(select(Strategy).where(Strategy.id == sid))).scalar_one()
+                    row.last_scheduled_run_at = stale
+                await session.commit()
+
+        import asyncio
+
+        asyncio.run(poison_and_force_due())
+
+        async def run_scheduler():
+            async with AsyncSessionLocal() as session:
+                return await strategy_service.run_due_scheduled(session)
+
+        ran = asyncio.run(run_scheduler())
+        assert ran == 2
+
+        async def load_state():
+            async with AsyncSessionLocal() as session:
+                good_row = (await session.execute(select(Strategy).where(Strategy.id == good_id))).scalar_one()
+                bad_row = (await session.execute(select(Strategy).where(Strategy.id == bad_id))).scalar_one()
+                bad_runs = list(
+                    (
+                        await session.execute(select(StrategyRun).where(StrategyRun.strategy_id == bad_id))
+                    ).scalars()
+                )
+                return good_row.last_scheduled_run_at, bad_row.last_scheduled_run_at, bad_runs
+
+        good_last, bad_last, bad_runs = asyncio.run(load_state())
+        assert good_last is not None and good_last.year != 2020
+        assert bad_last is not None and bad_last.year != 2020
+        assert any("Invalid strategy rules" in (run.notes or "") for run in bad_runs)
