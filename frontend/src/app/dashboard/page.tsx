@@ -135,11 +135,11 @@ export default function DashboardPage() {
             <p className="p-3 text-xs text-[var(--muted)]">Generate signals from AI Signals</p>
           )}
         </Panel>
-        <Panel title="Watchlist" action={<Link href="/watchlist" className="text-[10px] text-[var(--accent)]">Manage</Link>}>
+        <Panel title="Holdings" action={<Link href="/holdings" className="text-[10px] text-[var(--accent)]">View all</Link>}>
           {normHoldings.length ? (
             <HoldingsTable items={normHoldings} />
           ) : (
-            <p className="p-3 text-xs text-[var(--muted)]">Add symbols to your watchlist</p>
+            <p className="p-3 text-xs text-[var(--muted)]">No holdings yet</p>
           )}
         </Panel>
       </div>
