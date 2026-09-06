@@ -1,8 +1,11 @@
-function resolveApiBase(): string {
+export function resolveApiBase(): string {
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (host === "localhost" || host === "127.0.0.1") {
-      return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      // Talk to the API on the same loopback host the UI is served from so the
+      // request Origin stays consistent (localhost UI -> localhost API,
+      // 127.0.0.1 UI -> 127.0.0.1 API) and passes the backend CORS check.
+      return process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
     }
     return "";
   }
