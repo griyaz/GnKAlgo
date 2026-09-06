@@ -95,6 +95,8 @@ export default function SettingsPage() {
     }
   }
 
+  const brokerNeedsClientId = broker === "dhan" || broker === "fyers";
+
   return (
     <AppShell>
       <h1 className="text-lg font-semibold text-[var(--text-primary)]">Settings</h1>
@@ -183,20 +185,29 @@ export default function SettingsPage() {
       </section>
 
       <section id="broker" className="mt-6 scroll-mt-8 rounded-2xl border border-[#1d3542] p-5">
-        <h2 className="font-medium">2. Connect Dhan (paper first)</h2>
+        <h2 className="font-medium">2. Connect a broker (paper first)</h2>
         <p className="mt-2 text-sm text-slate-400">
-          From DhanHQ: API key / access token and client ID. Tokens are encrypted at rest.
-          Live Dhan orders need a <strong>static public IP</strong> whitelisted at Dhan (Oracle reserved IP).
+          Choose your broker and paste its API credentials. Tokens are encrypted at rest and
+          never exposed to the browser or in API responses.
         </p>
-        <p className="mt-2 text-sm text-slate-400">
-          3. Optional Groww: needs a Groww Trading API subscription, then choose Groww below.
-        </p>
+        <ul className="mt-2 list-disc pl-5 text-sm text-slate-400">
+          <li><strong>Dhan</strong> — access token + client ID. Live orders need a <strong>static public IP</strong> whitelisted at Dhan (Oracle reserved IP).</li>
+          <li><strong>Groww</strong> — access token. Needs an active Groww Trading API subscription.</li>
+          <li><strong>FYERS</strong> — access token + client/app ID (e.g. <code>ABCD1234-100</code>). Token expires daily.</li>
+          <li><strong>Upstox</strong> — access token (Upstox API v2).</li>
+        </ul>
         <form onSubmit={connect} className="mt-4 grid gap-3 md:grid-cols-2">
           <select className="rounded-lg border border-[#1d3542] bg-[#071018] px-3 py-2" value={broker} onChange={(e) => setBroker(e.target.value)}>
             <option value="dhan">Dhan</option>
             <option value="groww">Groww (optional)</option>
+            <option value="fyers">FYERS</option>
+            <option value="upstox">Upstox</option>
           </select>
-          <input className="rounded-lg border border-[#1d3542] bg-[#071018] px-3 py-2" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} />
+          {brokerNeedsClientId ? (
+            <input className="rounded-lg border border-[#1d3542] bg-[#071018] px-3 py-2" placeholder={broker === "fyers" ? "Client / App ID (e.g. ABCD1234-100)" : "Client ID"} value={clientId} onChange={(e) => setClientId(e.target.value)} />
+          ) : (
+            <div className="hidden md:block" aria-hidden="true" />
+          )}
           <input className="md:col-span-2 rounded-lg border border-[#1d3542] bg-[#071018] px-3 py-2" placeholder="Access token / API key" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} type="password" />
           <button className="rounded-xl bg-[#2ee6a6] px-4 py-2 font-semibold text-[#071018]">Save encrypted</button>
         </form>
