@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -8,6 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Order, Strategy, StrategyRun, User
+
+logger = logging.getLogger(__name__)
 from app.schemas.trading import (
     PlaceOrderRequest,
     SmcIntradayRules,
@@ -70,6 +73,10 @@ def _merge_update_rules(data: StrategyUpdateRequest, existing: str) -> dict:
 
 def build_rules_json(data: StrategyCreateRequest | StrategyUpdateRequest, existing: str | None = None) -> str:
     if data.rules_json:
+        try:
+            parse_rules(data.rules_json)
+        except (ValueError, TypeError, json.JSONDecodeError, ValidationError, KeyError) as exc:
+            raise ValueError(f"Invalid rules_json: {exc}") from exc
         return data.rules_json
     if isinstance(data, StrategyCreateRequest):
         return json.dumps(_rules_from_create(data))
@@ -91,12 +98,20 @@ def build_rules_json(data: StrategyCreateRequest | StrategyUpdateRequest, existi
 
 def parse_rules(rules_json: str) -> ParsedRules:
     raw = json.loads(rules_json or "{}")
+    if not isinstance(raw, dict):
+        raise ValueError("rules_json must be a JSON object")
     if raw.get("type") == "smc_intraday":
         return SmcIntradayRules(**raw)
     action = raw.get("action", "BUY")
     if action not in ("BUY", "SELL"):
         action = "BUY"
-    return StrategyRules(action=action, qty=int(raw.get("qty", 1)))
+    try:
+        qty = int(raw.get("qty") or 1)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("qty must be an integer") from exc
+    if qty < 1:
+        raise ValueError("qty must be greater than zero")
+    return StrategyRules(action=action, qty=qty)
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -291,22 +306,29 @@ class StrategyService:
         run: StrategyRun,
         scheduled: bool,
     ) -> StrategyRun:
-        candle_data = await candle_service.get_candles(
-            db,
-            strategy.symbol,
-            "NSE",
-            rules.timeframe,
-            count=120,
-        )
-        candles = candle_data.get("candles", [])
-        signal = evaluate_smc_intraday(
-            candles,
-            entry_mode=rules.entry,
-            side_mode=rules.action,
-            buffer_pct=rules.stop_loss_buffer_pct,
-            target_rr=rules.target_rr,
-            swing_lookback=rules.swing_lookback,
-        )
+        try:
+            candle_data = await candle_service.get_candles(
+                db,
+                strategy.symbol,
+                "NSE",
+                rules.timeframe,
+                count=120,
+            )
+            candles = candle_data.get("candles", [])
+            signal = evaluate_smc_intraday(
+                candles,
+                entry_mode=rules.entry,
+                side_mode=rules.action,
+                buffer_pct=rules.stop_loss_buffer_pct,
+                target_rr=rules.target_rr,
+                swing_lookback=rules.swing_lookback,
+            )
+        except Exception as exc:
+            run.status = "FAILED"
+            run.notes = f"SMC evaluation failed: {exc}"
+            if scheduled:
+                strategy.last_scheduled_run_at = datetime.now(timezone.utc)
+            return run
         if not signal.should_trade or not signal.side:
             run.status = "SKIPPED"
             run.notes = f"SMC no trade: {signal.reason}"
@@ -342,10 +364,18 @@ class StrategyService:
         if not strategy:
             raise ValueError("Strategy not found")
 
-        rules = parse_rules(strategy.rules_json)
         run = StrategyRun(strategy_id=strategy.id, status="RUNNING")
         db.add(run)
         await db.flush()
+
+        try:
+            rules = parse_rules(strategy.rules_json)
+        except (ValueError, TypeError, json.JSONDecodeError, ValidationError, KeyError) as exc:
+            run.status = "FAILED"
+            run.notes = f"Invalid strategy rules: {exc}"
+            if scheduled:
+                strategy.last_scheduled_run_at = datetime.now(timezone.utc)
+            return run
 
         if isinstance(rules, SmcIntradayRules):
             return await self._run_smc_intraday(db, user, strategy, rules, run, scheduled)
@@ -373,23 +403,50 @@ class StrategyService:
     async def run_due_scheduled(self, db: AsyncSession) -> int:
         now = datetime.now(timezone.utc)
         result = await db.execute(
-            select(Strategy).where(
+            select(Strategy.id).where(
                 Strategy.schedule_enabled.is_(True),
                 Strategy.interval_minutes >= 1,
                 Strategy.status != "PAUSED",
-            )
+            ).order_by(Strategy.created_at, Strategy.id)
         )
-        strategies = list(result.scalars().all())
+        strategy_ids = list(result.scalars().all())
         ran = 0
-        for strategy in strategies:
-            if not self.is_due(strategy, now):
+        for strategy_id in strategy_ids:
+            strategy = await db.get(Strategy, strategy_id)
+            if not strategy or not self.is_due(strategy, now):
                 continue
             user_result = await db.execute(select(User).where(User.id == strategy.user_id))
             user = user_result.scalar_one_or_none()
             if not user or not user.is_active:
                 continue
-            await self.run_once(db, user, strategy.id, scheduled=True)
-            ran += 1
+            try:
+                await self.run_once(db, user, strategy_id, scheduled=True)
+                await db.commit()
+                ran += 1
+            except Exception:
+                # A later crash must not roll back orders already sent to the broker
+                # for earlier strategies in this tick.
+                logger.exception(
+                    "Scheduled strategy %s crashed; isolating from the rest of the tick",
+                    strategy_id,
+                )
+                await db.rollback()
+                try:
+                    crashed = await db.get(Strategy, strategy_id)
+                    if crashed:
+                        crashed.last_scheduled_run_at = datetime.now(timezone.utc)
+                        db.add(
+                            StrategyRun(
+                                strategy_id=strategy_id,
+                                status="FAILED",
+                                notes="Scheduled run crashed; isolated so other strategies keep trading",
+                            )
+                        )
+                        await db.commit()
+                    ran += 1
+                except Exception:
+                    logger.exception("Failed to record isolated crash for strategy %s", strategy_id)
+                    await db.rollback()
         return ran
 
 
