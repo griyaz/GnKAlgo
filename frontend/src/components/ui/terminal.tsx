@@ -1,4 +1,5 @@
 import { fmtINR } from "@/lib/format";
+import { BackButton } from "@/components/ui/BackButton";
 
 export function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded bg-[var(--panel-2)] ${className}`} />;
@@ -67,18 +68,27 @@ export function PageHeader({
   title,
   subtitle,
   action,
+  back,
+  backHref,
 }: {
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
+  /** Show a Back button above the title on secondary/nested pages. */
+  back?: boolean;
+  /** Fallback route for the Back button when there is no in-app history. */
+  backHref?: string;
 }) {
   return (
-    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-      <div>
-        <h1 className="text-lg font-semibold text-white">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-xs text-[var(--muted)]">{subtitle}</p>}
+    <div className="mb-3">
+      {back && <BackButton fallbackHref={backHref} className="mb-2" />}
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-lg font-semibold text-white">{title}</h1>
+          {subtitle && <p className="mt-0.5 text-xs text-[var(--muted)]">{subtitle}</p>}
+        </div>
+        {action}
       </div>
-      {action}
     </div>
   );
 }

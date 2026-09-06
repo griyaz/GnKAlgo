@@ -1,6 +1,7 @@
 "use client";
 
 import { AppShell } from "@/components/AppShell";
+import { BackButton } from "@/components/ui/BackButton";
 import { api } from "@/lib/api";
 import { FormEvent, useEffect, useState } from "react";
 
@@ -39,6 +40,7 @@ export default function WebhooksPage() {
 
   return (
     <AppShell>
+      <BackButton className="mb-2" />
       <h1 className="text-3xl font-semibold">Webhooks</h1>
       <p className="mt-2 text-sm text-slate-400">
         POST JSON with symbol, action, and qty to the inbound URL. Required headers:

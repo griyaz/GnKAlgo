@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { BackButton } from "@/components/ui/BackButton";
 import { ChartHeader } from "@/components/charts/ChartHeader";
 import { ChartLegend } from "@/components/charts/ChartLegend";
 import { ChartSettingsPanel } from "@/components/charts/ChartSettingsPanel";
@@ -195,6 +196,7 @@ export default function ChartsPage() {
 
   return (
     <AppShell>
+      {!fullscreen && <BackButton className="mb-2" />}
       <div ref={fsRef} className={fullscreen ? "bg-[var(--panel)]" : ""}>
         <Panel className="overflow-hidden">
           {chartBlock}

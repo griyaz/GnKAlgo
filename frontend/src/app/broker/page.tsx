@@ -40,7 +40,7 @@ export default function BrokerPage() {
 
   return (
     <AppShell>
-      <PageHeader title="Broker" subtitle="Dhan connection for GnKAlgo trading" />
+      <PageHeader title="Broker" subtitle="Dhan connection for GnKAlgo trading" back />
       {error && <ErrorBanner message={error} />}
 
       <div className="grid gap-3 lg:grid-cols-2">

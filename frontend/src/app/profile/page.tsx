@@ -41,7 +41,7 @@ export default function ProfilePage() {
 
   return (
     <AppShell>
-      <PageHeader title="Profile" subtitle="Account identity and trading segments" />
+      <PageHeader title="Profile" subtitle="Account identity and trading segments" back />
       {error && <ErrorBanner message={error} />}
       {profile && (
         <div className="space-y-3">

@@ -1,6 +1,7 @@
 "use client";
 
 import { AppShell } from "@/components/AppShell";
+import { BackButton } from "@/components/ui/BackButton";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import { api } from "@/lib/api";
 import { FormEvent, useEffect, useState } from "react";
@@ -99,6 +100,7 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
+      <BackButton className="mb-2" />
       <h1 className="text-lg font-semibold text-[var(--text-primary)]">Settings</h1>
       <SettingsNav />
       <p className="mt-2 text-slate-400">{me?.email} · verified: {String(me?.is_verified)} · MFA: {String(me?.mfa_enabled)}</p>

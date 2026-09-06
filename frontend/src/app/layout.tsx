@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
+import { NavigationTracker } from "@/components/NavigationTracker";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,6 +32,7 @@ export default function RootLayout({
         <script>{themeInitScript}</script>
       </head>
       <body className="antialiased min-h-screen">
+        <NavigationTracker />
         <ThemeProvider>{children}</ThemeProvider>
       </body>
     </html>
