@@ -98,6 +98,7 @@ export default function PositionsPage() {
   return (
     <AppShell>
       <PageHeader
+        back
         title="Positions"
         subtitle={connected ? "Live from Dhan" : "Connect Dhan in Broker to sync positions"}
         action={

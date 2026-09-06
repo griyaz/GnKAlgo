@@ -8,7 +8,7 @@ import { EmptyState, PageHeader, Panel } from "@/components/ui/terminal";
 export default function AlertsPage() {
   return (
     <AppShell>
-      <PageHeader title="Alerts" subtitle="Price and webhook alerts" />
+      <PageHeader title="Alerts" subtitle="Price and webhook alerts" back />
       <Panel className="p-4">
         <EmptyState
           title="Alerts"

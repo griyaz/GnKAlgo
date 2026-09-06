@@ -47,6 +47,7 @@ export default function MoneyPage() {
   return (
     <AppShell>
       <PageHeader
+        back
         title="Money"
         subtitle="Funds and margin from your broker"
         action={

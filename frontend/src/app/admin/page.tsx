@@ -1,6 +1,7 @@
 "use client";
 
 import { AppShell } from "@/components/AppShell";
+import { BackButton } from "@/components/ui/BackButton";
 import { api } from "@/lib/api";
 import { useEffect, useState } from "react";
 
@@ -99,6 +100,7 @@ export default function AdminPage() {
 
   return (
     <AppShell>
+      <BackButton className="mb-2" />
       <h1 className="text-3xl font-semibold">Admin</h1>
       <p className="mt-1 text-slate-400">Registered users, logins, and UPI payments</p>
       {meEmail && (

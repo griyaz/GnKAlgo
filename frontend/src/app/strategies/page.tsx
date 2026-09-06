@@ -1,6 +1,7 @@
 "use client";
 
 import { AppShell } from "@/components/AppShell";
+import { BackButton } from "@/components/ui/BackButton";
 import { api } from "@/lib/api";
 import { FormEvent, useEffect, useState } from "react";
 
@@ -228,6 +229,7 @@ export default function StrategiesPage() {
 
   return (
     <AppShell>
+      <BackButton className="mb-2" />
       <h1 className="text-3xl font-semibold">Strategy builder</h1>
       <p className="mt-2 text-sm text-slate-400">
         Simple BUY/SELL or SMC intraday (entry, stop loss, target on chart rules). Paper first.

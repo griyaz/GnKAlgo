@@ -89,6 +89,7 @@ export default function OrdersPage() {
   return (
     <AppShell>
       <PageHeader
+        back
         title="Orders"
         subtitle={brokerConnected ? "GnKAlgo + Dhan broker orders" : "Paper orders · Connect Dhan for live sync"}
         action={

@@ -1,6 +1,7 @@
 "use client";
 
 import { PaymentInstructions } from "@/components/billing/PaymentInstructions";
+import { BackButton } from "@/components/ui/BackButton";
 import { CopyButton } from "@/components/billing/CopyButton";
 import { api } from "@/lib/api";
 import { Logo } from "@/components/Logo";
@@ -127,6 +128,9 @@ function PayInner() {
   return (
     <main className="mx-auto max-w-2xl px-4 sm:px-6 py-12 overflow-visible">
       <Logo href="/subscribe" size={44} />
+      <div className="mt-4">
+        <BackButton fallbackHref="/subscribe" />
+      </div>
       <h1 className="mt-6 text-2xl font-semibold">
         {checkout.is_renewal ? "Renew subscription" : "Complete UPI payment"}
       </h1>

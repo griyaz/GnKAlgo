@@ -44,6 +44,7 @@ export default function SignalsPage() {
   return (
     <AppShell>
       <PageHeader
+        back
         title="AI Signals"
         subtitle="GnKAlgo ML signals — never auto-executed without an approved strategy"
         action={

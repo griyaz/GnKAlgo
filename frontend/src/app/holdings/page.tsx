@@ -52,6 +52,7 @@ export default function HoldingsPage() {
   return (
     <AppShell>
       <PageHeader
+        back
         title="Holdings"
         subtitle="Delivery portfolio from connected broker"
         action={

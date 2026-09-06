@@ -71,7 +71,7 @@ export default function WatchlistPage() {
 
   return (
     <AppShell>
-      <PageHeader title="Watchlist" subtitle="Search instruments and track symbols" />
+      <PageHeader title="Watchlist" subtitle="Search instruments and track symbols" back />
       <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
         <Panel>
           <TabBar tabs={tabs} active={activeList} onChange={setActiveList} />
