@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     groww_client_id: str = ""
     groww_client_secret: str = ""
 
+    # Order-execution REST endpoints for the optional FYERS/Upstox broker adapters.
+    # (Separate from the market-data feed config further below.)
+    fyers_api_base_url: str = "https://api-t1.fyers.in/api/v3"
+    upstox_api_base_url: str = "https://api.upstox.com/v2"
+
     ml_service_url: str = "http://localhost:8001"
     ml_service_token: str = ""
     backend_public_url: str = "http://localhost:8000"

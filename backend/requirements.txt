@@ -24,3 +24,8 @@ slowapi==0.1.9
 # it only loads when MARKET_DATA_PROVIDER=fyers. See docs/LIVE_MARKET_TICKER.md.
 fyers-apiv3==3.1.16
 
+# LiveMarketTicker fallback provider (Upstox Market Data Feed V3, protobuf).
+# Bundled so MARKET_DATA_PROVIDER=upstox works out of the box; imported lazily
+# so it only loads when Upstox is selected/enabled.
+upstox-python-sdk==2.15.0
+

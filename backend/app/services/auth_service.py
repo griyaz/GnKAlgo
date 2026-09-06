@@ -305,19 +305,25 @@ class BrokerService:
         request: Request,
     ) -> BrokerConnection:
         broker_enum = BrokerType(broker)
+        token = credentials.get("access_token") or credentials.get("api_key") or ""
         if broker_enum == BrokerType.DHAN:
             from app.brokers.dhan import DhanAdapter
 
-            adapter = DhanAdapter(
-                access_token=credentials.get("access_token") or credentials.get("api_key") or "",
-                client_id=credentials.get("client_id"),
+            adapter = DhanAdapter(access_token=token, client_id=credentials.get("client_id"))
+        elif broker_enum == BrokerType.FYERS:
+            from app.brokers.fyers import FyersExecutionAdapter
+
+            adapter = FyersExecutionAdapter(
+                access_token=token, client_id=credentials.get("client_id")
             )
+        elif broker_enum == BrokerType.UPSTOX:
+            from app.brokers.upstox import UpstoxExecutionAdapter
+
+            adapter = UpstoxExecutionAdapter(access_token=token)
         else:
             from app.brokers.groww import GrowwAdapter
 
-            adapter = GrowwAdapter(
-                access_token=credentials.get("access_token") or credentials.get("api_key") or "",
-            )
+            adapter = GrowwAdapter(access_token=token)
         try:
             await adapter.authenticate(credentials)
             health = "connected"
