@@ -21,6 +21,7 @@ from app.schemas.trading import (
 from app.services import billing_service
 from app.services.candle_service import BASE_PRICES, candle_service
 from app.services.order_service import order_service
+from app.services.order_status import DEPLOYED_ORDER_STATUSES, is_successful_placement
 from app.services.strategy_evaluators.smc_intraday import evaluate_smc_intraday
 
 ParsedRules = StrategyRules | SmcIntradayRules
@@ -250,7 +251,7 @@ class StrategyService:
             select(Order).where(
                 Order.strategy_id == strategy.id,
                 Order.created_at >= start,
-                Order.status.in_(("FILLED", "PAPER_FILLED")),
+                Order.status.in_(DEPLOYED_ORDER_STATUSES),
             )
         )
         cashflow = 0.0
@@ -345,7 +346,7 @@ class StrategyService:
             if scheduled:
                 strategy.last_scheduled_run_at = datetime.now(timezone.utc)
             return run
-        run.status = "COMPLETED" if order.status in ("PAPER_FILLED", "FILLED", "PENDING") else "FAILED"
+        run.status = "COMPLETED" if is_successful_placement(order.status) else "FAILED"
         run.notes = (
             f"Order {order.id} status={order.status}; "
             f"entry={signal.entry} sl={signal.stop_loss} target={signal.target} ({signal.reason})"
@@ -394,7 +395,7 @@ class StrategyService:
             run.status = "FAILED"
             run.notes = str(exc)
             return run
-        run.status = "COMPLETED" if order.status in ("PAPER_FILLED", "FILLED", "PENDING") else "FAILED"
+        run.status = "COMPLETED" if is_successful_placement(order.status) else "FAILED"
         run.notes = f"Order {order.id} status={order.status}"
         if scheduled:
             strategy.last_scheduled_run_at = datetime.now(timezone.utc)

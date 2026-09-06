@@ -304,3 +304,151 @@ def test_scheduled_runner_continues_after_corrupt_rules():
         assert good_last is not None and good_last.year != 2020
         assert bad_last is not None and bad_last.year != 2020
         assert any("Invalid strategy rules" in (run.notes or "") for run in bad_runs)
+
+
+def _insert_strategy_order(strategy_id, user_id, status: str, price: float = 2500.0):
+    from app.database import AsyncSessionLocal
+    from app.models import Order
+
+    async def _write():
+        async with AsyncSessionLocal() as session:
+            session.add(
+                Order(
+                    user_id=user_id,
+                    broker="dhan",
+                    symbol="RELIANCE",
+                    exchange="NSE",
+                    side="BUY",
+                    quantity=1,
+                    order_type="MARKET",
+                    price=price,
+                    product_type="INTRADAY",
+                    status=status,
+                    source="strategy",
+                    strategy_id=strategy_id,
+                )
+            )
+            await session.commit()
+
+    import asyncio
+
+    asyncio.run(_write())
+
+
+def test_daily_loss_blocks_after_live_traded_or_pending_order():
+    """Dhan stores TRADED/PENDING, not FILLED. Those fills must still trip max_daily_loss."""
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import User
+
+    with TestClient(app) as client:
+        email = f"loss-{uuid.uuid4().hex[:8]}@gnkalgo.com"
+        access = _register_login(client, email)
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Loss cap",
+                "symbol": "RELIANCE",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "max_daily_loss": 1000,
+            },
+        )
+        assert created.status_code == 200
+        strategy_id = uuid.UUID(created.json()["id"])
+
+        async def user_id():
+            async with AsyncSessionLocal() as session:
+                user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+                return user.id
+
+        import asyncio
+
+        _insert_strategy_order(strategy_id, asyncio.run(user_id()), "TRADED", price=2500)
+
+        blocked = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+        assert blocked.status_code == 200
+        assert blocked.json()["status"] == "FAILED"
+        assert "Max daily loss" in blocked.json()["notes"]
+
+
+def test_daily_loss_ignores_rejected_orders():
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import User
+
+    with TestClient(app) as client:
+        email = f"rejloss-{uuid.uuid4().hex[:8]}@gnkalgo.com"
+        access = _register_login(client, email)
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Reject skip",
+                "symbol": "RELIANCE",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "max_daily_loss": 1000,
+            },
+        )
+        strategy_id = uuid.UUID(created.json()["id"])
+
+        async def user_id():
+            async with AsyncSessionLocal() as session:
+                user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+                return user.id
+
+        import asyncio
+
+        _insert_strategy_order(strategy_id, asyncio.run(user_id()), "REJECTED", price=2500)
+
+        ran = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+        assert ran.status_code == 200
+        assert "Order" in ran.json()["notes"]
+        assert ran.json()["status"] == "COMPLETED"
+
+
+def test_daily_loss_counts_pending_live_orders():
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import User
+
+    with TestClient(app) as client:
+        email = f"pendloss-{uuid.uuid4().hex[:8]}@gnkalgo.com"
+        access = _register_login(client, email)
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Pending cap",
+                "symbol": "RELIANCE",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "max_daily_loss": 1000,
+            },
+        )
+        strategy_id = uuid.UUID(created.json()["id"])
+
+        async def user_id():
+            async with AsyncSessionLocal() as session:
+                user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+                return user.id
+
+        import asyncio
+
+        _insert_strategy_order(strategy_id, asyncio.run(user_id()), "PENDING", price=2500)
+
+        blocked = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+        assert blocked.status_code == 200
+        assert blocked.json()["status"] == "FAILED"
+        assert "Max daily loss" in blocked.json()["notes"]
