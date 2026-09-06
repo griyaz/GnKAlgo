@@ -112,6 +112,24 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
     @property
+    def cors_origin_regex(self) -> str:
+        """Origin regex for CORS, in addition to the explicit ``origins_list``.
+
+        Production is locked to the gnkalgo.com domains. Outside production we
+        also accept any localhost / 127.0.0.1 port over http, so the dev UI works
+        no matter which loopback host or port it is served from (e.g. when 3000
+        is busy and Next.js falls back to another port, or the browser is pointed
+        at 127.0.0.1 instead of localhost). Without this, those origins are
+        rejected by CORS and every authenticated fetch fails with
+        "Failed to fetch" in the browser.
+        """
+        prod = r"https://([a-z0-9-]+\.)?gnkalgo\.com"
+        if self.app_env.strip().lower() in {"production", "prod"}:
+            return prod
+        local = r"http://(localhost|127\.0\.0\.1)(:\d+)?"
+        return f"{prod}|{local}"
+
+    @property
     def smtp_configured(self) -> bool:
         """Return true only when SMTP has usable, non-placeholder settings.
 

@@ -1,4 +1,4 @@
-import { api } from "@/lib/api";
+import { api, resolveApiBase } from "@/lib/api";
 
 export type Profile = {
   id: string;
@@ -38,9 +38,7 @@ export async function updateProfile(data: Record<string, unknown>): Promise<Prof
 export async function uploadProfilePhoto(file: File): Promise<Profile> {
   const form = new FormData();
   form.append("file", file);
-  const base = typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")
-    ? process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-    : "";
+  const base = resolveApiBase();
   const res = await fetch(`${base}/api/v1/profile/photo`, {
     method: "POST",
     credentials: "include",
