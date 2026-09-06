@@ -11,6 +11,8 @@ from app.database import Base
 class BrokerType(str, enum.Enum):
     DHAN = "dhan"
     GROWW = "groww"
+    FYERS = "fyers"
+    UPSTOX = "upstox"
 
 
 class User(Base):
@@ -90,7 +92,9 @@ class BrokerConnection(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), index=True)
-    broker: Mapped[BrokerType] = mapped_column(Enum(BrokerType, native_enum=False), nullable=False)
+    broker: Mapped[BrokerType] = mapped_column(
+        Enum(BrokerType, native_enum=False, length=20), nullable=False
+    )
     encrypted_credentials: Mapped[str] = mapped_column(Text, nullable=False)
     client_id: Mapped[str | None] = mapped_column(String(100))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

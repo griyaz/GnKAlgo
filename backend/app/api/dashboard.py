@@ -23,7 +23,12 @@ async def dashboard_summary(
     brokers = await db.execute(
         select(BrokerConnection).where(BrokerConnection.user_id == current_user.id)
     )
-    broker_status = {"dhan": "not_connected", "groww": "not_connected"}
+    broker_status = {
+        "dhan": "not_connected",
+        "groww": "not_connected",
+        "fyers": "not_connected",
+        "upstox": "not_connected",
+    }
     for conn in brokers.scalars():
         broker_status[conn.broker.value] = conn.health_status
 

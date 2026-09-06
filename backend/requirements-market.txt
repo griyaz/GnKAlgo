@@ -1,13 +1,8 @@
-# Optional market-data provider SDK for the LiveMarketTicker.
+# Optional market-data provider SDKs for the LiveMarketTicker.
 #
-# The FYERS SDK (fyers-apiv3) is bundled in requirements.txt because FYERS is the
-# default primary provider. Upstox V3 support is optional and lives here because
-# it is a disabled-by-default fallback:
-#
-#   pip install -r backend/requirements-market.txt   # enable Upstox V3
-#
-# The Upstox provider imports this lazily, so the core backend runs (and all
-# tests pass, incl. MARKET_DATA_MOCK_MODE) without it.
-
-# Upstox Market Data Feed V3 (optional fallback).
-upstox-python-sdk==2.15.0
+# NOTE: The two providers GnKAlgo ships with — FYERS (fyers-apiv3) and Upstox
+# (upstox-python-sdk) — are now BUNDLED in requirements.txt, so the ticker works
+# for MARKET_DATA_PROVIDER=fyers and =upstox out of the box. This file is kept as
+# the place to pin any additional/experimental market-data SDKs that should stay
+# out of the default image. Both bundled providers import their SDK lazily, so the
+# core backend runs (and all tests pass, incl. MARKET_DATA_MOCK_MODE) without them.
