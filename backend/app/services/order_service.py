@@ -15,6 +15,7 @@ from app.schemas.trading import PlaceOrderRequest
 from app.services import billing_service
 from app.services.instrument_segments import dhan_exchange_segment
 from app.services.instrument_service import instrument_service
+from app.services.order_status import normalize_broker_status
 from app.services.risk import RiskRejection, validate_order
 
 
@@ -163,7 +164,9 @@ class OrderService:
                 )
             )
             order.broker_order_id = response.broker_order_id
-            order.status = response.status or "PENDING"
+            # Dhan returns TRADED/TRANSIT/PENDING — persist a status the rest of
+            # the platform (daily-loss, run completion) actually recognizes.
+            order.status = normalize_broker_status(response.status)
             order.message = response.message
         except Exception as exc:
             order.status = "REJECTED"
