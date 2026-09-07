@@ -8,6 +8,8 @@ from app.models.trading import (
     TradingControl,
     Webhook,
     WebhookLog,
+    Alert,
+    AlertEvent,
 )
 from app.models.user import (
     AuditLog,
@@ -34,6 +36,8 @@ __all__ = [
     "Signal",
     "Webhook",
     "WebhookLog",
+    "Alert",
+    "AlertEvent",
     "Payment",
     "Subscription",
     "Instrument",

@@ -29,7 +29,7 @@ export function ChartHeader({
   crosshair: CrosshairInfo;
   dataSource?: string;
 }) {
-  const ltp = crosshair?.c ?? quote?.ltp ?? 0;
+  const ltp = crosshair?.c ?? quote?.ltp;
   const change = quote?.change ?? 0;
   const changePct = crosshair?.changePct ?? quote?.change_pct ?? 0;
   const up = change > 0;
@@ -57,14 +57,14 @@ export function ChartHeader({
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--line)] px-3 py-2">
       <div>
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base font-semibold text-white">{quote?.symbol ?? "—"}</h2>
+          <h2 className="text-base font-semibold text-white">{quote?.symbol ?? displayName}</h2>
           <span className="text-[11px] text-[var(--muted)]">{displayName}</span>
           <span className="rounded bg-[var(--panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--muted)]">
             {quote?.exchange ?? "NSE"}
           </span>
         </div>
         <div className="mt-1 flex flex-wrap items-baseline gap-3">
-          <span className="text-xl font-semibold tabular-nums text-white">{fmtNum(ltp)}</span>
+          <span className="text-xl font-semibold tabular-nums text-white">{ltp == null ? "—" : fmtNum(ltp)}</span>
           <span className={`text-sm tabular-nums ${color}`}>
             {sign}{fmtNum(change)} ({fmtPct(changePct)})
           </span>

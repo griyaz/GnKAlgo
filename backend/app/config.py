@@ -60,18 +60,14 @@ class Settings(BaseSettings):
     billing_scheduler_tick_seconds: int = 3600
 
     cache_candles_ttl_seconds: int = 120
-    cache_news_ttl_seconds: int = 300
-    news_provider: str = "finnhub"
-    finnhub_api_key: str = ""
-    finnhub_base_url: str = "https://finnhub.io/api/v1"
 
     # ------------------------------------------------------------------
     # Live market ticker (LiveMarketTicker) — see docs/LIVE_MARKET_TICKER.md
     # ------------------------------------------------------------------
     # Primary upstream provider for the index ticker feed: fyers | dhan | upstox | mock
     market_data_provider: str = "fyers"
-    # Only switch to a fallback provider when the primary is unavailable AND this is true.
-    market_data_failover_enabled: bool = False
+    # Switch to Upstox (then optional Dhan feed) when the primary is unavailable.
+    market_data_failover_enabled: bool = True
     # Mark a tick stale when no upstream update arrives within this many seconds (market open).
     market_data_stale_seconds: int = 10
     # Deterministic demo feed for local dev/tests. Never a silent production fallback.

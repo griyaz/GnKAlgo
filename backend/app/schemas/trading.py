@@ -158,3 +158,31 @@ class SignalResponse(BaseModel):
     disclaimer: str = "Not investment advice. For educational purposes only."
 
     model_config = {"from_attributes": True}
+
+
+class AlertCreateRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    exchange: str = Field(default="NSE", max_length=8)
+    condition: Literal["PRICE"] = "PRICE"
+    operator: Literal[">", ">=", "<", "<="] = ">"
+    threshold: float = Field(gt=0)
+    recurring: bool = False
+
+
+class AlertUpdateRequest(BaseModel):
+    status: Literal["ACTIVE", "PAUSED"] | None = None
+
+
+class AlertResponse(BaseModel):
+    id: UUID
+    symbol: str
+    exchange: str
+    condition: str
+    operator: str
+    threshold: float
+    status: str
+    recurring: bool
+    created_at: datetime
+    triggered_at: datetime | None
+
+    model_config = {"from_attributes": True}

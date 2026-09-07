@@ -124,11 +124,11 @@ export function TradingChart({
           horzLines: { color: settings.showGrid ? c.grid : "transparent" },
         },
         crosshair: { mode: 1 },
-        rightPriceScale: { borderColor: c.border },
+        rightPriceScale: { borderColor: c.border, autoScale: settings.autoScale },
         timeScale: { borderColor: c.border, timeVisible: true, secondsVisible: false },
       });
     },
-    [settings.showGrid],
+    [settings.autoScale, settings.showGrid],
   );
 
   const clearOverlaySeries = useCallback(() => {
@@ -257,7 +257,7 @@ export function TradingChart({
     const c = chartColors();
     const priceChart = createChart(priceContainerRef.current, {
       width: priceContainerRef.current.clientWidth,
-      height: 340,
+      height: Math.max(420, priceContainerRef.current.clientHeight || 520),
       layout: { background: { color: c.background }, textColor: c.muted },
       grid: {
         vertLines: { color: c.grid },
@@ -347,7 +347,10 @@ export function TradingChart({
 
     const resize = () => {
       if (priceContainerRef.current) {
-        priceChart.applyOptions({ width: priceContainerRef.current.clientWidth });
+        priceChart.applyOptions({
+          width: priceContainerRef.current.clientWidth,
+          height: Math.max(420, priceContainerRef.current.clientHeight || 520),
+        });
       }
       if (rsiContainerRef.current && rsiChart) {
         rsiChart.applyOptions({ width: rsiContainerRef.current.clientWidth });
@@ -437,7 +440,7 @@ export function TradingChart({
 
   return (
     <div>
-      <div ref={priceContainerRef} className="w-full" />
+      <div ref={priceContainerRef} className="h-[min(68vh,640px)] min-h-[420px] w-full" />
       <div
         ref={rsiContainerRef}
         className={`w-full border-t border-[var(--line)] ${settings.rsi.enabled ? "" : "hidden"}`}

@@ -15,6 +15,7 @@ from app.api.market import router as market_router
 from app.api.portfolio import router as portfolio_router
 from app.api.profile import router as profile_router
 from app.api.admin import router as admin_router
+from app.api.alerts import router as alerts_router
 from app.api.auth import brokers_router, router as auth_router
 from app.api.billing import router as billing_router
 from app.api.dashboard import router as dashboard_router
@@ -137,6 +138,7 @@ async def lifespan(app: FastAPI):
     import logging
 
     from app.services.billing_scheduler import start_billing_scheduler
+    from app.services.alert_scheduler import start_alert_scheduler
     from app.services.instrument_scheduler import bootstrap_instruments, start_instrument_scheduler
     from app.services.strategy_scheduler import start_strategy_scheduler
 
@@ -154,6 +156,7 @@ async def lifespan(app: FastAPI):
 
     scheduler_task = start_strategy_scheduler()
     billing_task = start_billing_scheduler()
+    alert_task = start_alert_scheduler()
     instrument_task = start_instrument_scheduler() if settings.instrument_sync_enabled else None
 
     from app.market_data.manager import market_manager
@@ -165,6 +168,7 @@ async def lifespan(app: FastAPI):
     await market_manager.stop()
     scheduler_task.cancel()
     billing_task.cancel()
+    alert_task.cancel()
     if instrument_task:
         instrument_task.cancel()
     try:
@@ -173,6 +177,10 @@ async def lifespan(app: FastAPI):
         pass
     try:
         await billing_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await alert_task
     except asyncio.CancelledError:
         pass
     if instrument_task:
@@ -252,6 +260,7 @@ for prefix in (API_PREFIX, "/v1"):
     app.include_router(webhooks_router, prefix=prefix)
     app.include_router(billing_router, prefix=prefix)
     app.include_router(admin_router, prefix=prefix)
+    app.include_router(alerts_router, prefix=prefix)
     app.include_router(market_router, prefix=prefix)
     app.include_router(portfolio_router, prefix=prefix)
     app.include_router(profile_router, prefix=prefix)

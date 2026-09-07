@@ -144,3 +144,28 @@ class WebhookLog(Base):
     response: Mapped[str | None] = mapped_column(Text)
     status_code: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id"), index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    exchange: Mapped[str] = mapped_column(String(8), default="NSE")
+    condition: Mapped[str] = mapped_column(String(32), default="PRICE")
+    operator: Mapped[str] = mapped_column(String(4), default=">")
+    threshold: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
+    recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AlertEvent(Base):
+    __tablename__ = "alert_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    alert_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("alerts.id"), index=True)
+    value: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
