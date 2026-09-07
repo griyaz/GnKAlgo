@@ -1,12 +1,13 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
 from app.database import get_db
-from app.models import User
-from app.schemas.trading import StrategyCreateRequest, StrategyResponse, StrategyUpdateRequest
+from app.models import StrategyVersion, User
+from app.schemas.trading import StrategyCreateRequest, StrategyResponse, StrategyUpdateRequest, StrategyVersionResponse
 from app.services.strategy_service import strategy_service
 
 router = APIRouter(prefix="/strategies", tags=["Strategies"])
@@ -59,7 +60,8 @@ async def update_status(
     try:
         strategy = await strategy_service.set_status(db, current_user, strategy_id, status)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        code = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=code, detail=str(exc))
     return strategy
 
 
@@ -74,3 +76,26 @@ async def run_strategy(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return {"run_id": str(run.id), "status": run.status, "notes": run.notes}
+
+
+@router.get("/{strategy_id}/versions", response_model=list[StrategyVersionResponse])
+async def list_versions(
+    strategy_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    # The version table is queried with an ownership subquery to avoid exposing
+    # another user's immutable rules.
+    from app.models import Strategy
+
+    owned = (
+        await db.execute(select(Strategy.id).where(Strategy.id == strategy_id, Strategy.user_id == current_user.id))
+    ).scalar_one_or_none()
+    if not owned:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    result = await db.execute(
+        select(StrategyVersion)
+        .where(StrategyVersion.strategy_id == strategy_id)
+        .order_by(StrategyVersion.version.desc())
+    )
+    return list(result.scalars())

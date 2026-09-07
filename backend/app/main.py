@@ -16,12 +16,14 @@ from app.api.portfolio import router as portfolio_router
 from app.api.profile import router as profile_router
 from app.api.admin import router as admin_router
 from app.api.alerts import router as alerts_router
+from app.api.backtests import router as backtests_router
 from app.api.auth import brokers_router, router as auth_router
 from app.api.billing import router as billing_router
 from app.api.dashboard import router as dashboard_router
 from app.api.market_ticker import router as market_ticker_router
 from app.api.market_ticker import ws_router as market_ticker_ws_router
 from app.api.orders import router as orders_router
+from app.api.paper import router as paper_router
 from app.api.signals import router as signals_router
 from app.api.strategies import router as strategies_router
 from app.api.webhooks import router as webhooks_router
@@ -257,6 +259,8 @@ for prefix in (API_PREFIX, "/v1"):
     app.include_router(orders_router, prefix=prefix)
     app.include_router(strategies_router, prefix=prefix)
     app.include_router(signals_router, prefix=prefix)
+    app.include_router(backtests_router, prefix=prefix)
+    app.include_router(paper_router, prefix=prefix)
     app.include_router(webhooks_router, prefix=prefix)
     app.include_router(billing_router, prefix=prefix)
     app.include_router(admin_router, prefix=prefix)

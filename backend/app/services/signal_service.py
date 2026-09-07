@@ -33,9 +33,22 @@ class SignalService:
             signal = Signal(
                 user_id=user.id,
                 symbol=item.get("symbol", ""),
+                exchange=item.get("exchange", "NSE"),
                 action=item.get("action", "HOLD"),
                 confidence=float(item.get("confidence") or 0),
                 price=item.get("price"),
+                entry_min=item.get("entry_min", item.get("entry")),
+                entry_max=item.get("entry_max", item.get("entry")),
+                stop_loss=item.get("stop_loss"),
+                target_1=item.get("target_1", item.get("target")),
+                target_2=item.get("target_2"),
+                timeframe=item.get("timeframe", "15m"),
+                status=item.get("status", "ACTIVE"),
+                explanation=item.get("explanation") or item.get("reason"),
+                strategy_source=item.get("strategy_source") or item.get("strategy"),
+                model_source=item.get("model_source") or "ml-service",
+                execution_mode="PAPER",
+                model_version=item.get("model_version", "rf-v1"),
                 features_json=json.dumps(item.get("features") or {}),
             )
             db.add(signal)

@@ -1,4 +1,6 @@
 import httpx
+from datetime import datetime, timedelta
+from urllib.parse import quote
 
 from app.brokers.base import BrokerAdapter, OrderRequest, OrderResponse
 from app.config import settings
@@ -97,6 +99,59 @@ class UpstoxExecutionAdapter(BrokerAdapter):
     async def get_market_quote(self, symbols: list[str]) -> dict:
         joined = ",".join(symbols)
         return await self._request("GET", f"/market-quote/ltp?instrument_key={joined}")
+
+    async def get_historical_candles(
+        self,
+        security_id: str,
+        exchange: str,
+        segment: str,
+        interval: str,
+    ) -> list[dict]:
+        """Fetch normalized candles through Upstox's v2 historical endpoint.
+
+        ``Instrument.instrument_token`` is preferred because Upstox expects an
+        instrument key (for example ``NSE_EQ|INE...``), while the endpoint
+        returns newest-first arrays. No data is fabricated when the provider
+        is unavailable; CandleService can then apply its configured fallback.
+        """
+        unit_map = {
+            "1m": ("minutes", "1"),
+            "3m": ("minutes", "3"),
+            "5m": ("minutes", "5"),
+            "15m": ("minutes", "15"),
+            "30m": ("minutes", "30"),
+            "1H": ("hours", "1"),
+            "4H": ("hours", "4"),
+            "1D": ("days", "1"),
+            "1W": ("weeks", "1"),
+        }
+        unit, multiplier = unit_map.get(interval, ("minutes", "15"))
+        end = datetime.utcnow().date()
+        days = 30 if unit in {"minutes", "hours"} else 3650
+        start = end - timedelta(days=days)
+        instrument_key = security_id if "|" in security_id else f"{exchange}_{segment}|{security_id}"
+        path = (
+            f"/historical-candle/{quote(instrument_key, safe='')}/{unit}/{multiplier}/"
+            f"{end.isoformat()}/{start.isoformat()}"
+        )
+        data = await self._request("GET", path)
+        candles = (data.get("data") or {}).get("candles", []) if isinstance(data, dict) else []
+        normalized = []
+        for row in reversed(candles):
+            if len(row) < 5:
+                continue
+            timestamp = row[0]
+            if isinstance(timestamp, str):
+                timestamp = int(datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp())
+            normalized.append({
+                "time": int(timestamp / 1000) if int(timestamp) > 1_000_000_000_000 else int(timestamp),
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": int(row[5]) if len(row) > 5 and row[5] is not None else None,
+            })
+        return normalized
 
     async def health_check(self) -> bool:
         try:

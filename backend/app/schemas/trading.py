@@ -114,6 +114,8 @@ class StrategyResponse(BaseModel):
     schedule_enabled: bool
     interval_minutes: int
     last_scheduled_run_at: datetime | None
+    current_version: int
+    paper_verified_at: datetime | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -150,12 +152,133 @@ class InboundWebhookPayload(BaseModel):
 class SignalResponse(BaseModel):
     id: UUID
     symbol: str
+    exchange: str
     action: str
     confidence: float
     price: float | None
+    entry_range: dict[str, float | None]
+    targets: list[float]
+    entry_min: float | None
+    entry_max: float | None
+    stop_loss: float | None
+    target_1: float | None
+    target_2: float | None
+    timeframe: str
+    status: str
+    explanation: str | None
+    strategy_source: str | None
+    model_source: str | None
+    execution_mode: str
     model_version: str
     created_at: datetime
     disclaimer: str = "Not investment advice. For educational purposes only."
+
+    model_config = {"from_attributes": True}
+
+
+class SignalRouteRequest(BaseModel):
+    mode: Literal["paper", "live"] = "paper"
+    quantity: int = Field(default=1, gt=0, le=10000)
+    broker: Literal["dhan", "groww", "paper"] = "paper"
+    live_confirmation: str | None = Field(default=None, max_length=32)
+
+
+class StrategyVersionResponse(BaseModel):
+    id: UUID
+    strategy_id: UUID
+    version: int
+    rules_json: str
+    status: str
+    changelog: str | None
+    created_at: datetime
+    published_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class CandleInput(BaseModel):
+    time: int | datetime
+    open: float = Field(gt=0)
+    high: float = Field(gt=0)
+    low: float = Field(gt=0)
+    close: float = Field(gt=0)
+    volume: float | None = Field(default=None, ge=0)
+
+
+class BacktestRequest(BaseModel):
+    strategy_id: UUID | None = None
+    strategy_version: int | None = Field(default=None, ge=1)
+    rules_json: str | None = None
+    candles: list[CandleInput] = Field(min_length=2, max_length=10000)
+    initial_capital: float = Field(default=100000, gt=0)
+    quantity: int = Field(default=1, gt=0, le=10000)
+    commission_bps: float = Field(default=0, ge=0, le=100)
+    slippage_bps: float = Field(default=0, ge=0, le=100)
+
+
+class BacktestTradeResponse(BaseModel):
+    side: str
+    quantity: int
+    entry_time: datetime
+    entry_price: float
+    exit_time: datetime
+    exit_price: float
+    pnl: float
+    reason: str
+
+
+class BacktestResponse(BaseModel):
+    id: UUID
+    strategy_id: UUID | None
+    strategy_version_id: UUID | None
+    status: str
+    candles_count: int
+    initial_capital: float
+    final_equity: float
+    total_return: float
+    max_drawdown: float
+    trade_count: int
+    metrics: dict
+    trades: list[BacktestTradeResponse] = Field(default_factory=list)
+    created_at: datetime
+
+
+class PaperRunCreateRequest(BaseModel):
+    strategy_id: UUID | None = None
+    initial_cash: float = Field(default=100000, gt=0)
+    max_daily_loss: float = Field(default=5000, gt=0)
+    max_position_qty: int = Field(default=500, gt=0, le=100000)
+
+
+class PaperOrderRequest(BaseModel):
+    symbol: str = Field(min_length=1, max_length=32)
+    exchange: str = "NSE"
+    side: Literal["BUY", "SELL"]
+    quantity: int = Field(gt=0, le=100000)
+    price: float = Field(gt=0)
+
+
+class PaperPositionResponse(BaseModel):
+    symbol: str
+    quantity: int
+    average_price: float
+    last_price: float | None
+    realized_pnl: float
+
+
+class PaperRunResponse(BaseModel):
+    id: UUID
+    strategy_id: UUID | None
+    status: str
+    initial_cash: float
+    cash: float
+    realized_pnl: float
+    unrealized_pnl: float
+    max_daily_loss: float
+    max_position_qty: int
+    started_at: datetime
+    finished_at: datetime | None
+    positions: list[PaperPositionResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

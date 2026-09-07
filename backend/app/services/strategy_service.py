@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Order, Strategy, StrategyRun, User
+from app.models import Order, Strategy, StrategyRun, StrategyVersion, User
 
 logger = logging.getLogger(__name__)
 from app.schemas.trading import (
@@ -131,7 +131,8 @@ class StrategyService:
     def _status_for_mode(self, paper_mode: bool, schedule_enabled: bool) -> str:
         if not schedule_enabled:
             return "DRAFT"
-        return "PAPER" if paper_mode else "LIVE"
+        # Live is an explicit, gated transition after a paper run/backtest.
+        return "PAPER" if paper_mode else "DRAFT"
 
     async def create(self, db: AsyncSession, user: User, data: StrategyCreateRequest) -> Strategy:
         if not data.paper_mode:
@@ -156,6 +157,16 @@ class StrategyService:
         )
         db.add(strategy)
         await db.flush()
+        db.add(
+            StrategyVersion(
+                strategy_id=strategy.id,
+                version=1,
+                rules_json=rules_json,
+                status="DRAFT",
+                changelog="Initial strategy version",
+                created_by=user.id,
+            )
+        )
         return strategy
 
     async def update(
@@ -185,7 +196,7 @@ class StrategyService:
         if data.max_daily_loss is not None:
             strategy.max_daily_loss = data.max_daily_loss
 
-        if any(
+        rules_changed = any(
             v is not None
             for v in (
                 data.rules_json,
@@ -197,8 +208,20 @@ class StrategyService:
                 data.stop_loss_buffer_pct,
                 data.target_rr,
             )
-        ):
+        )
+        if rules_changed:
             strategy.rules_json = build_rules_json(data, strategy.rules_json)
+            strategy.current_version = (strategy.current_version or 0) + 1
+            db.add(
+                StrategyVersion(
+                    strategy_id=strategy.id,
+                    version=strategy.current_version,
+                    rules_json=strategy.rules_json,
+                    status="DRAFT",
+                    changelog="Rules updated",
+                    created_by=user.id,
+                )
+            )
 
         schedule_was_off = not strategy.schedule_enabled
         if data.schedule_enabled is not None:
@@ -211,10 +234,17 @@ class StrategyService:
             strategy.interval_minutes = 0
 
         if data.status is not None:
+            self._validate_transition(strategy, data.status)
+            if data.status == "LIVE":
+                blocked = await self._live_blocked(db, user, strategy)
+                if blocked:
+                    raise ValueError(blocked)
             strategy.status = data.status
         elif data.schedule_enabled is not None or data.paper_mode is not None:
-            if strategy.status != "PAUSED":
-                strategy.status = self._status_for_mode(strategy.paper_mode, strategy.schedule_enabled)
+            if strategy.status not in {"PAUSED", "LIVE"}:
+                target_status = self._status_for_mode(strategy.paper_mode, strategy.schedule_enabled)
+                self._validate_transition(strategy, target_status)
+                strategy.status = target_status
 
         if data.schedule_enabled and schedule_was_off:
             strategy.last_scheduled_run_at = datetime.now(timezone.utc)
@@ -228,8 +258,29 @@ class StrategyService:
         strategy = result.scalar_one_or_none()
         if not strategy:
             raise ValueError("Strategy not found")
+        self._validate_transition(strategy, status)
+        if status == "LIVE":
+            blocked = await self._live_blocked(db, user, strategy)
+            if blocked:
+                raise ValueError(blocked)
         strategy.status = status
         return strategy
+
+    @staticmethod
+    def _validate_transition(strategy: Strategy, target: str) -> None:
+        if target not in {"DRAFT", "PAPER", "LIVE", "PAUSED"}:
+            raise ValueError("Invalid strategy lifecycle status")
+        current = strategy.status
+        allowed = {
+            "DRAFT": {"DRAFT", "PAPER", "PAUSED"},
+            "PAPER": {"PAPER", "PAUSED", "DRAFT", "LIVE"},
+            "LIVE": {"LIVE", "PAUSED"},
+            "PAUSED": {"PAUSED", "DRAFT", "PAPER", "LIVE"},
+        }
+        if target not in allowed.get(current, {"DRAFT"}):
+            raise ValueError(f"Invalid lifecycle transition {current} -> {target}")
+        if target == "LIVE" and not strategy.paper_verified_at:
+            raise ValueError("Run a successful paper/backtest validation before live deployment")
 
     def is_due(self, strategy: Strategy, now: datetime) -> bool:
         if not strategy.schedule_enabled or strategy.interval_minutes < 1:
@@ -368,6 +419,15 @@ class StrategyService:
         run = StrategyRun(strategy_id=strategy.id, status="RUNNING")
         db.add(run)
         await db.flush()
+        version_result = await db.execute(
+            select(StrategyVersion).where(
+                StrategyVersion.strategy_id == strategy.id,
+                StrategyVersion.version == strategy.current_version,
+            )
+        )
+        version = version_result.scalar_one_or_none()
+        if version:
+            run.strategy_version_id = version.id
 
         try:
             rules = parse_rules(strategy.rules_json)
