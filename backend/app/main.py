@@ -14,7 +14,6 @@ from sqlalchemy import text
 from app.api.market import router as market_router
 from app.api.portfolio import router as portfolio_router
 from app.api.profile import router as profile_router
-from app.api.news import router as news_router
 from app.api.admin import router as admin_router
 from app.api.auth import brokers_router, router as auth_router
 from app.api.billing import router as billing_router
@@ -256,7 +255,6 @@ for prefix in (API_PREFIX, "/v1"):
     app.include_router(market_router, prefix=prefix)
     app.include_router(portfolio_router, prefix=prefix)
     app.include_router(profile_router, prefix=prefix)
-    app.include_router(news_router, prefix=prefix)
     app.include_router(market_ticker_router, prefix=prefix)
 
 # Internal ticker WebSocket lives at the app root: /ws/market/ticker
