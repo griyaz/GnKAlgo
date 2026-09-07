@@ -6,7 +6,7 @@ from backend.app.schemas.instrument import InstrumentCreate, InstrumentOut, Inst
 from backend.app.crud.instrument import (
     create_instrument, get_instrument, list_instruments, get_instrument_by_exchange_symbol, update_instrument
 )
-from backend.app.api.deps import get_db
+from app.database import get_db
 
 router = APIRouter()
 

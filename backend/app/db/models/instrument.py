@@ -2,7 +2,7 @@ from sqlalchemy import (
     Column, Integer, String, Boolean, Numeric, DateTime, UniqueConstraint, Index
 )
 from sqlalchemy.sql import func
-from backend.app.db.base import Base
+from app.database import Base
 
 class Instrument(Base):
     __tablename__ = "instruments"
