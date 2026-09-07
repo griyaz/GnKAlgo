@@ -415,6 +415,115 @@ def test_daily_loss_ignores_rejected_orders():
         assert ran.json()["status"] == "COMPLETED"
 
 
+def test_scheduler_skips_draft_live_strategy_and_places_no_order():
+    """Scheduled SMC/live create lands in DRAFT; that must not call the broker."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import Order, Strategy
+    from app.services.strategy_service import strategy_service
+
+    with TestClient(app) as client:
+        access = _register_login(client, f"draftlive-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Draft live SMC",
+                "symbol": "RELIANCE",
+                "strategy_type": "smc_intraday",
+                "action": "AUTO",
+                "qty": 1,
+                "paper_mode": True,
+                "schedule_enabled": True,
+                "interval_minutes": 1,
+            },
+        )
+        assert created.status_code == 200
+        strategy_id = uuid.UUID(created.json()["id"])
+        stale = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+        async def make_draft_live():
+            async with AsyncSessionLocal() as session:
+                row = (await session.execute(select(Strategy).where(Strategy.id == strategy_id))).scalar_one()
+                row.paper_mode = False
+                row.status = "DRAFT"
+                row.last_scheduled_run_at = stale
+                await session.commit()
+
+        import asyncio
+
+        asyncio.run(make_draft_live())
+
+        async def run_scheduler():
+            async with AsyncSessionLocal() as session:
+                return await strategy_service.run_due_scheduled(session)
+
+        asyncio.run(run_scheduler())
+
+        async def load_state():
+            async with AsyncSessionLocal() as session:
+                row = (await session.execute(select(Strategy).where(Strategy.id == strategy_id))).scalar_one()
+                orders = list(
+                    (await session.execute(select(Order).where(Order.strategy_id == strategy_id))).scalars()
+                )
+                return row.last_scheduled_run_at, orders
+
+        last, orders = asyncio.run(load_state())
+        assert last is not None and last.year == 2020
+        assert orders == []
+
+
+def test_run_once_rejects_live_orders_until_strategy_is_live():
+    with TestClient(app) as client:
+        access = _register_login(client, f"runlive-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Draft live simple",
+                "symbol": "TCS",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+            },
+        )
+        assert created.status_code == 200
+        strategy_id = uuid.UUID(created.json()["id"])
+
+        from sqlalchemy import select
+
+        from app.database import AsyncSessionLocal
+        from app.models import Order, Strategy
+
+        async def make_draft_live():
+            async with AsyncSessionLocal() as session:
+                row = (await session.execute(select(Strategy).where(Strategy.id == strategy_id))).scalar_one()
+                row.paper_mode = False
+                row.status = "DRAFT"
+                await session.commit()
+
+        import asyncio
+
+        asyncio.run(make_draft_live())
+        ran = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+        assert ran.status_code == 200
+        assert ran.json()["status"] == "FAILED"
+        assert "LIVE" in ran.json()["notes"]
+
+        async def load_orders():
+            async with AsyncSessionLocal() as session:
+                return list(
+                    (await session.execute(select(Order).where(Order.strategy_id == strategy_id))).scalars()
+                )
+
+        assert asyncio.run(load_orders()) == []
+
+
 def test_daily_loss_counts_pending_live_orders():
     from sqlalchemy import select
 
