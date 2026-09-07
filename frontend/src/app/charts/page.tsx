@@ -12,7 +12,6 @@ import { IndicatorToolbar } from "@/components/charts/IndicatorToolbar";
 import { SymbolSearch } from "@/components/charts/SymbolSearch";
 import { TimeframeSelector } from "@/components/charts/TimeframeSelector";
 import { TradingChart, type CrosshairPayload } from "@/components/charts/TradingChart";
-import { LatestNews } from "@/components/news/LatestNews";
 import { Panel } from "@/components/ui/terminal";
 import {
   DEFAULT_CHART_SETTINGS,
@@ -201,11 +200,6 @@ export default function ChartsPage() {
         <Panel className="overflow-hidden">
           {chartBlock}
         </Panel>
-        {!fullscreen && (
-          <div className="mt-3">
-            <LatestNews symbol={instrument.symbol} />
-          </div>
-        )}
       </div>
     </AppShell>
   );
