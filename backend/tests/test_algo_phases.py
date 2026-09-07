@@ -1,6 +1,8 @@
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 from app.services.backtest_service import run_backtest
 from app.services.strategy_service import StrategyService
-from types import SimpleNamespace
 
 
 def test_backtest_fills_after_signal_candle_without_lookahead():
@@ -42,3 +44,23 @@ def test_live_lifecycle_requires_paper_validation():
         assert "paper/backtest" in str(exc)
     else:
         raise AssertionError("live transition must require paper validation")
+
+
+def _scheduled(status: str, paper_mode: bool, last=None):
+    return SimpleNamespace(
+        schedule_enabled=True,
+        interval_minutes=1,
+        status=status,
+        paper_mode=paper_mode,
+        last_scheduled_run_at=last,
+    )
+
+
+def test_scheduler_does_not_treat_draft_live_strategies_as_due():
+    """Create-with-live + schedule used to stay DRAFT and still auto-fire."""
+    now = datetime.now(timezone.utc)
+    svc = StrategyService()
+    assert svc.is_due(_scheduled("DRAFT", paper_mode=False), now) is False
+    assert svc.is_due(_scheduled("PAPER", paper_mode=False), now) is False
+    assert svc.is_due(_scheduled("PAPER", paper_mode=True), now) is True
+    assert svc.is_due(_scheduled("LIVE", paper_mode=False), now) is True

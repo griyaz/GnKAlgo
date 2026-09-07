@@ -287,6 +287,12 @@ class StrategyService:
             return False
         if strategy.status == "PAUSED":
             return False
+        # DRAFT is not an execution state. Live capital requires an explicit LIVE
+        # transition after paper/backtest validation; PAPER may paper-trade.
+        if strategy.status not in {"PAPER", "LIVE"}:
+            return False
+        if not strategy.paper_mode and strategy.status != "LIVE":
+            return False
         last = _aware(strategy.last_scheduled_run_at)
         if last is None:
             return True
@@ -329,6 +335,8 @@ class StrategyService:
         qty: int,
         scheduled: bool,
     ):
+        if not strategy.paper_mode and strategy.status != "LIVE":
+            raise ValueError("Strategy must be LIVE before placing live orders")
         blocked = await self._live_blocked(db, user, strategy)
         if blocked:
             raise ValueError(blocked)
@@ -468,7 +476,7 @@ class StrategyService:
             select(Strategy.id).where(
                 Strategy.schedule_enabled.is_(True),
                 Strategy.interval_minutes >= 1,
-                Strategy.status != "PAUSED",
+                Strategy.status.in_(("PAPER", "LIVE")),
             ).order_by(Strategy.created_at, Strategy.id)
         )
         strategy_ids = list(result.scalars().all())
