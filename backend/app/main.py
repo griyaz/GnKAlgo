@@ -15,12 +15,15 @@ from app.api.market import router as market_router
 from app.api.portfolio import router as portfolio_router
 from app.api.profile import router as profile_router
 from app.api.admin import router as admin_router
+from app.api.alerts import router as alerts_router
+from app.api.backtests import router as backtests_router
 from app.api.auth import brokers_router, router as auth_router
 from app.api.billing import router as billing_router
 from app.api.dashboard import router as dashboard_router
 from app.api.market_ticker import router as market_ticker_router
 from app.api.market_ticker import ws_router as market_ticker_ws_router
 from app.api.orders import router as orders_router
+from app.api.paper import router as paper_router
 from app.api.signals import router as signals_router
 from app.api.strategies import router as strategies_router
 from app.api.webhooks import router as webhooks_router
@@ -137,6 +140,7 @@ async def lifespan(app: FastAPI):
     import logging
 
     from app.services.billing_scheduler import start_billing_scheduler
+    from app.services.alert_scheduler import start_alert_scheduler
     from app.services.instrument_scheduler import bootstrap_instruments, start_instrument_scheduler
     from app.services.strategy_scheduler import start_strategy_scheduler
 
@@ -154,6 +158,7 @@ async def lifespan(app: FastAPI):
 
     scheduler_task = start_strategy_scheduler()
     billing_task = start_billing_scheduler()
+    alert_task = start_alert_scheduler()
     instrument_task = start_instrument_scheduler() if settings.instrument_sync_enabled else None
 
     from app.market_data.manager import market_manager
@@ -165,6 +170,7 @@ async def lifespan(app: FastAPI):
     await market_manager.stop()
     scheduler_task.cancel()
     billing_task.cancel()
+    alert_task.cancel()
     if instrument_task:
         instrument_task.cancel()
     try:
@@ -173,6 +179,10 @@ async def lifespan(app: FastAPI):
         pass
     try:
         await billing_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await alert_task
     except asyncio.CancelledError:
         pass
     if instrument_task:
@@ -223,6 +233,9 @@ def _csrf_exempt(path: str) -> bool:
 
 @app.middleware("http")
 async def csrf_protection(request: Request, call_next):
+    # slowapi's response handler reads this even when rate limiting is
+    # disabled (for example in tests and local development).
+    request.state.view_rate_limit = None
     if not request.headers.get("Authorization") and not _csrf_exempt(request.url.path) and request.method in {"POST", "PUT", "PATCH", "DELETE"} and (
         request.cookies.get("gnk_access") or request.cookies.get("gnk_refresh")
     ):
@@ -249,9 +262,12 @@ for prefix in (API_PREFIX, "/v1"):
     app.include_router(orders_router, prefix=prefix)
     app.include_router(strategies_router, prefix=prefix)
     app.include_router(signals_router, prefix=prefix)
+    app.include_router(backtests_router, prefix=prefix)
+    app.include_router(paper_router, prefix=prefix)
     app.include_router(webhooks_router, prefix=prefix)
     app.include_router(billing_router, prefix=prefix)
     app.include_router(admin_router, prefix=prefix)
+    app.include_router(alerts_router, prefix=prefix)
     app.include_router(market_router, prefix=prefix)
     app.include_router(portfolio_router, prefix=prefix)
     app.include_router(profile_router, prefix=prefix)
@@ -285,3 +301,38 @@ async def api_root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "gnkalgo-backend", "version": "0.1.0"}
+
+
+@app.get("/health/ready")
+async def readiness():
+    """Deployment readiness probe; never reports live-ready on bad config."""
+    from fastapi.responses import JSONResponse
+    from app.market_data import store
+
+    checks: dict[str, object] = {"database": "ok", "redis": "ok"}
+    errors = settings.production_config_errors
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception:
+        checks["database"] = "error"
+        errors = [*errors, "Database is unavailable"]
+    if not await store.redis_healthy():
+        checks["redis"] = "degraded"
+        if settings.app_env.strip().lower() in {"production", "prod"}:
+            errors = [*errors, "Redis is unavailable"]
+    from app.market_data.manager import market_manager
+
+    market_health = await market_manager.health()
+    checks["market_data"] = market_health
+    if settings.app_env.strip().lower() in {"production", "prod"} and market_health["status"] != "healthy":
+        errors = [*errors, "Market-data provider is not healthy"]
+    payload = {
+        "status": "ready" if not errors else "not_ready",
+        "service": "gnkalgo-backend",
+        "checks": checks,
+        "configuration_errors": errors,
+    }
+    if errors:
+        return JSONResponse(status_code=503, content=payload)
+    return payload

@@ -19,6 +19,7 @@ from app.market_data.providers.base import BackoffPolicy
 from app.market_data.providers.dhan import DhanProvider
 from app.market_data.providers.fyers import FyersProvider
 from app.market_data.providers.mock import MockProvider
+from app.market_data.providers.upstox import UpstoxProvider
 from app.market_data.symbols import by_fyers_symbol, get_index_universe
 
 
@@ -65,6 +66,29 @@ def test_dhan_normalization():
     assert tick.symbol == sym.id
     assert tick.provider == "DHAN"
     assert tick.ltp == Decimal("25100.0")
+
+
+def test_upstox_normalization():
+    provider = UpstoxProvider(access_token="token")
+    sym = get_index_universe()[0]
+    ticks = provider.normalize({
+        "feeds": {
+            sym.upstox: {"ltpc": {"ltp": 25110.0, "cp": 24990.0}},
+        },
+    })
+    assert len(ticks) == 1
+    assert ticks[0].symbol == "NIFTY50"
+    assert ticks[0].provider == "UPSTOX"
+    assert ticks[0].ltp == Decimal("25110.0")
+
+
+def test_failover_prefers_upstox_before_optional_dhan(monkeypatch):
+    monkeypatch.setattr(settings, "market_data_provider", "fyers")
+    monkeypatch.setattr(settings, "market_data_failover_enabled", True)
+    monkeypatch.setattr(settings, "upstox_market_data_enabled", True)
+    monkeypatch.setattr(settings, "dhan_market_data_enabled", True)
+    manager = MarketDataManager()
+    assert manager._provider_candidates() == ["fyers", "upstox", "dhan"]
 
 
 # 2 + 3. Percentage calculation + zero previous-close -------------------------

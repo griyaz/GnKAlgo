@@ -42,7 +42,7 @@ Set the primary provider and (optionally) enable fallbacks in `.env`
 (see `.env.example`). All credentials are **backend-only** — never `NEXT_PUBLIC_*`.
 
 ```env
-MARKET_DATA_PROVIDER=fyers          # fyers | dhan | upstox | mock
+MARKET_DATA_PROVIDER=fyers          # fyers | upstox | dhan | mock
 MARKET_DATA_FAILOVER_ENABLED=false  # only switch to an enabled fallback if true
 MARKET_DATA_STALE_SECONDS=10
 MARKET_DATA_MOCK_MODE=false

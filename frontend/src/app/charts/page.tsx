@@ -22,6 +22,7 @@ import {
 } from "@/lib/chartSettings";
 import {
   fetchBrokerStatus,
+  fetchMarketSession,
   fetchQuote,
   type Instrument,
   type Quote,
@@ -96,20 +97,29 @@ export default function ChartsPage() {
   }, []);
 
   useEffect(() => {
-    const refresh = () => {
-      const st = marketDataService.getStatus();
-      if (st) {
-        setMarketLabel(st.label);
-        setMarketOpen(st.status === "open");
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const session = await fetchMarketSession();
+        if (!cancelled) {
+          setMarketLabel(session.label);
+          setMarketOpen(session.status === "open");
+        }
+      } catch {
+        // Keep the last server-provided status if a refresh is interrupted.
       }
     };
     refresh();
-    marketDataService.connect(30000);
-    const unsub = marketDataService.subscribe(refresh);
+    const timer = setInterval(refresh, 60_000);
     return () => {
-      unsub();
-      marketDataService.disconnect();
+      cancelled = true;
+      clearInterval(timer);
     };
+  }, []);
+
+  useEffect(() => {
+    marketDataService.connect(30000);
+    return () => marketDataService.disconnect();
   }, []);
 
   useEffect(() => {

@@ -35,6 +35,16 @@ export type Quote = {
   source?: string;
 };
 
+export type MarketSession = {
+  status: "open" | "closed" | "pre_open";
+  label: string;
+  session: string;
+};
+
+export async function fetchMarketSession(): Promise<MarketSession> {
+  return api<MarketSession>("/api/v1/market/status", {}, true);
+}
+
 export async function searchInstruments(
   q: string,
   options?: { limit?: number; exchange?: string; segment?: string },

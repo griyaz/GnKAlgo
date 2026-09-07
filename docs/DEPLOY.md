@@ -45,8 +45,10 @@ Do this after staging works:
 4. HTTPS on `www.gnkalgo.com` and `api.gnkalgo.com`
 5. CORS `ALLOWED_ORIGINS` set to those URLs
 6. Static egress IP for Dhan order APIs
-7. MFA required before live orders (next code change)
-8. Backups of Postgres
+7. Set `LIVE_TRADING_ENABLED=true` only after the live readiness checklist
+8. MFA, active subscription, market hours, kill switch, risk limits, broker
+   health, and audit logging are enforced centrally for every live path
+9. Backups of Postgres
 
 ## Option C — Managed hosts (less server work)
 
@@ -70,3 +72,12 @@ Do this after staging works:
 4. Connect Dhan only after static IP is whitelisted  
 
 Do not trade live money until risk checks, MFA, and broker sandbox/test are confirmed.
+
+Run the readiness probe after each deploy:
+
+```bash
+curl -fsS https://api.gnkalgo.com/health/ready
+```
+
+The API intentionally fails closed when required secrets or provider
+configuration is missing.

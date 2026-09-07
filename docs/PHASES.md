@@ -182,3 +182,26 @@ Phase 1 (Auth) → Phase 2 (Brokers) → Phase 3 (Orders)
 ```
 
 Phase 6 can start feature pipeline work in parallel with Phase 3 using mock data.
+
+## Incremental phase slice (implemented)
+
+The backend now provides a controlled vertical slice for the remaining phases:
+
+- Signals persist exchange, entry range, stop/targets, timeframe, lifecycle,
+  explanation and model/strategy provenance. `POST /api/v1/signals/{id}/route`
+  always goes through the existing risk, kill-switch, broker and audit guards;
+  live routing cannot be enabled by a signal payload alone.
+- Strategy rules are immutable `strategy_versions`. A successful deterministic
+  backtest marks a strategy as paper-validated, while `LIVE` remains an
+  explicit lifecycle transition.
+- `POST /api/v1/backtests/run` accepts validated OHLC data only. It derives a
+  decision from the completed prior candle and fills on the next open, so the
+  engine does not execute user Python/JavaScript or look ahead.
+- `/api/v1/paper/runs` provides simulated fills, positions, cash/P&L and
+  position/daily-loss controls without contacting a broker.
+
+Live deployment still depends on a configured broker connection, MFA,
+subscription, market hours, Dhan static-IP allowlisting and the persistent
+kill switch. Upstox V3 streaming and the existing instrument master are
+available; a provider-specific historical candle adapter remains deployment
+configuration dependent and is not silently substituted for real data.

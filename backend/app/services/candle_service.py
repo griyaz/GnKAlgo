@@ -101,8 +101,15 @@ class CandleService:
 
         if adapter:
             try:
+                security_id = inst["security_id"]
+                # Upstox accepts a provider instrument key when one is
+                # available in the shared instrument master.
+                if adapter.__class__.__name__.lower().startswith("upstox") and "|" in str(
+                    inst.get("instrument_token", "")
+                ):
+                    security_id = inst["instrument_token"]
                 candles = await adapter.get_historical_candles(
-                    security_id=inst["security_id"],
+                    security_id=security_id,
                     exchange=inst.get("exchange", exchange),
                     segment=inst.get("segment", "EQUITY"),
                     interval=interval,

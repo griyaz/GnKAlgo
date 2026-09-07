@@ -1,6 +1,8 @@
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
+from app.config import settings
+
 IST = ZoneInfo("Asia/Kolkata")
 MARKET_OPEN = time(9, 15)
 MARKET_CLOSE = time(15, 30)
@@ -18,7 +20,7 @@ def is_market_hours(now: datetime | None = None) -> bool:
         current = current.replace(tzinfo=IST)
     else:
         current = current.astimezone(IST)
-    if current.weekday() >= 5:
+    if current.weekday() >= 5 or current.date().isoformat() in settings.market_holiday_set:
         return False
     t = current.timetz().replace(tzinfo=None)
     return MARKET_OPEN <= t <= MARKET_CLOSE

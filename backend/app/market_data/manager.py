@@ -127,10 +127,14 @@ class MarketDataManager:
         primary = settings.market_data_provider.lower()
         candidates = [primary]
         if settings.market_data_failover_enabled:
-            if settings.dhan_market_data_enabled and "dhan" not in candidates:
-                candidates.append("dhan")
+            # Keep execution isolated from market data: Upstox is the
+            # preferred live-data fallback for a FYERS feed interruption.
             if settings.upstox_market_data_enabled and "upstox" not in candidates:
                 candidates.append("upstox")
+            # Dhan market data remains available only as an explicitly
+            # configured last-resort fallback.
+            if settings.dhan_market_data_enabled and "dhan" not in candidates:
+                candidates.append("dhan")
         return candidates
 
     # -- leadership (single upstream owner) ---------------------------
@@ -211,6 +215,7 @@ class MarketDataManager:
                 self._provider = provider
                 self._provider_name = provider.name
                 stable_since: float | None = None
+                rotated = False
                 try:
                     logger.info("market_data.provider.connecting provider=%s", provider.name)
                     await provider.connect()
@@ -238,12 +243,22 @@ class MarketDataManager:
                             exc,
                             datetime.now(timezone.utc).isoformat(),
                         )
+                        rotated = True
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     logger.warning(
                         "market_data.provider.error provider=%s error=%s", name, exc
                     )
+                    if settings.market_data_failover_enabled and len(candidates) > 1:
+                        previous = candidates[idx]
+                        idx = (idx + 1) % len(candidates)
+                        logger.warning(
+                            "market_data.failover provider=%s fallback=%s reason=connection_error",
+                            previous,
+                            candidates[idx],
+                        )
+                        rotated = True
                 finally:
                     self._connected = False
                     try:
@@ -254,6 +269,17 @@ class MarketDataManager:
 
                 if not (self._running and self._is_leader):
                     break
+                # A clean upstream close is still a failed connection. Rotate
+                # through the configured providers so a recovered FYERS feed
+                # is retried automatically after the fallback path.
+                if not rotated and settings.market_data_failover_enabled and len(candidates) > 1:
+                    previous = candidates[idx]
+                    idx = (idx + 1) % len(candidates)
+                    logger.info(
+                        "market_data.failover provider=%s next=%s reason=stream_closed",
+                        previous,
+                        candidates[idx],
+                    )
                 if stable_since is not None and (
                     monotonic() - stable_since >= backoff.stable_after_seconds
                 ):
