@@ -79,6 +79,8 @@ async def route_signal(
         source="signal",
     )
     signal.routed_order_id = order.id
-    signal.execution_mode = "LIVE" if live and order.status != "REJECTED" else "PAPER"
+    # A rejected live attempt must not be relabeled as paper execution; doing
+    # so would hide a failed live gate from callers and audit consumers.
+    signal.execution_mode = "LIVE" if live else "PAPER"
     signal.status = "ROUTED" if order.status != "REJECTED" else "ACTIVE"
     return {"signal_id": str(signal.id), "order_id": str(order.id), "status": order.status, "message": order.message}

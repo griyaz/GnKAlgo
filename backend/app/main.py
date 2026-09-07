@@ -233,6 +233,9 @@ def _csrf_exempt(path: str) -> bool:
 
 @app.middleware("http")
 async def csrf_protection(request: Request, call_next):
+    # slowapi's response handler reads this even when rate limiting is
+    # disabled (for example in tests and local development).
+    request.state.view_rate_limit = None
     if not request.headers.get("Authorization") and not _csrf_exempt(request.url.path) and request.method in {"POST", "PUT", "PATCH", "DELETE"} and (
         request.cookies.get("gnk_access") or request.cookies.get("gnk_refresh")
     ):
@@ -298,3 +301,38 @@ async def api_root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "gnkalgo-backend", "version": "0.1.0"}
+
+
+@app.get("/health/ready")
+async def readiness():
+    """Deployment readiness probe; never reports live-ready on bad config."""
+    from fastapi.responses import JSONResponse
+    from app.market_data import store
+
+    checks: dict[str, object] = {"database": "ok", "redis": "ok"}
+    errors = settings.production_config_errors
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+    except Exception:
+        checks["database"] = "error"
+        errors = [*errors, "Database is unavailable"]
+    if not await store.redis_healthy():
+        checks["redis"] = "degraded"
+        if settings.app_env.strip().lower() in {"production", "prod"}:
+            errors = [*errors, "Redis is unavailable"]
+    from app.market_data.manager import market_manager
+
+    market_health = await market_manager.health()
+    checks["market_data"] = market_health
+    if settings.app_env.strip().lower() in {"production", "prod"} and market_health["status"] != "healthy":
+        errors = [*errors, "Market-data provider is not healthy"]
+    payload = {
+        "status": "ready" if not errors else "not_ready",
+        "service": "gnkalgo-backend",
+        "checks": checks,
+        "configuration_errors": errors,
+    }
+    if errors:
+        return JSONResponse(status_code=503, content=payload)
+    return payload

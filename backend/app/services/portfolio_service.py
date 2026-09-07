@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 
 from app.brokers.factory import get_broker_adapter
 from app.models import BrokerConnection, BrokerType, User
@@ -77,6 +78,8 @@ class PortfolioService:
             healthy = await adapter.health_check()
         except Exception as exc:
             error = str(exc)
+        conn.last_health_check = datetime.now(timezone.utc)
+        conn.health_status = "connected" if healthy else "error"
         return {
             "broker": broker,
             "status": "connected" if healthy else "error",

@@ -30,7 +30,7 @@ class PlaceOrderRequest(BaseModel):
     order_type: Literal["MARKET", "LIMIT"] = "MARKET"
     price: float | None = None
     product_type: str = "INTRADAY"
-    broker: Literal["dhan", "groww", "paper"] = "paper"
+    broker: Literal["dhan", "groww", "fyers", "upstox", "paper"] = "paper"
     paper_mode: bool = True
     correlation_id: str | None = None
     live_confirmation: str | None = Field(default=None, max_length=32)
@@ -179,7 +179,7 @@ class SignalResponse(BaseModel):
 class SignalRouteRequest(BaseModel):
     mode: Literal["paper", "live"] = "paper"
     quantity: int = Field(default=1, gt=0, le=10000)
-    broker: Literal["dhan", "groww", "paper"] = "paper"
+    broker: Literal["dhan", "groww", "fyers", "upstox", "paper"] = "paper"
     live_confirmation: str | None = Field(default=None, max_length=32)
 
 

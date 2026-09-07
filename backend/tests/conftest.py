@@ -25,4 +25,10 @@ def pytest_sessionstart(session):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    test_db.unlink(missing_ok=True)
+    asyncio.run(engine.dispose())
+    try:
+        test_db.unlink(missing_ok=True)
+    except PermissionError:
+        # Windows can retain the aiosqlite worker handle briefly at teardown.
+        # Do not turn an otherwise successful test run into a failure.
+        pass

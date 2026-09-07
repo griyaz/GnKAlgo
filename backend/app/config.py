@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-change-in-production"
     encryption_key: str = "dev-encryption-key-32bytes-min!!"
     rate_limit_enabled: bool = True
+    # Live execution is an explicit deployment decision.  Paper trading is
+    # unaffected when this remains disabled.
+    live_trading_enabled: bool = False
+    live_max_order_quantity: int = 500
+    live_daily_loss_limit: float = 5000.0
+    broker_health_max_age_seconds: int = 300
 
     database_url: str = "sqlite+aiosqlite:///./gnkalgo.db"
     redis_url: str = "redis://localhost:6379/0"
@@ -94,6 +100,50 @@ class Settings(BaseSettings):
     # Upstox Market Data Feed V3 (optional fallback).
     upstox_market_data_enabled: bool = False
     upstox_access_token: str = ""
+
+    @property
+    def production_config_errors(self) -> list[str]:
+        """Return safe-to-log deployment errors (never include secret values)."""
+        if self.app_env.strip().lower() not in {"production", "prod"}:
+            return []
+        errors: list[str] = []
+        if self.debug:
+            errors.append("DEBUG must be false")
+        if not self.cookie_secure:
+            errors.append("COOKIE_SECURE must be true")
+        if self.database_url.startswith("sqlite"):
+            errors.append("DATABASE_URL must use PostgreSQL")
+        if not self.secret_key.strip() or "change" in self.secret_key.lower() or "replace" in self.secret_key.lower():
+            errors.append("SECRET_KEY is not configured")
+        if not self.encryption_key.strip() or "dev-" in self.encryption_key.lower() or "replace" in self.encryption_key.lower():
+            errors.append("ENCRYPTION_KEY is not configured")
+        if not self.frontend_url.startswith("https://") or not self.backend_public_url.startswith("https://"):
+            errors.append("FRONTEND_URL and BACKEND_PUBLIC_URL must use HTTPS")
+        provider = self.market_data_provider.strip().lower()
+        if provider == "mock":
+            errors.append("MARKET_DATA_PROVIDER cannot be mock in production")
+        elif provider == "fyers" and (not self.fyers_client_id.strip() or not self.fyers_access_token.strip()):
+            errors.append("FYERS_CLIENT_ID and FYERS_ACCESS_TOKEN are required for the FYERS provider")
+        elif provider == "upstox" and (
+            not self.upstox_market_data_enabled or not self.upstox_access_token.strip()
+        ):
+            errors.append("UPSTOX_MARKET_DATA_ENABLED and UPSTOX_ACCESS_TOKEN are required for the Upstox provider")
+        elif provider == "dhan" and (
+            not self.dhan_market_data_enabled
+            or not self.dhan_client_id.strip()
+            or not self.dhan_access_token.strip()
+        ):
+            errors.append("DHAN_MARKET_DATA_ENABLED, DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN are required for the Dhan provider")
+        elif provider not in {"fyers", "upstox", "dhan"}:
+            errors.append(f"Unsupported MARKET_DATA_PROVIDER: {provider or 'empty'}")
+        for name, url in (
+            ("FYERS_API_BASE_URL", self.fyers_api_base_url),
+            ("UPSTOX_API_BASE_URL", self.upstox_api_base_url),
+            ("DHAN_API_BASE_URL", self.dhan_api_base_url),
+        ):
+            if not url.startswith("https://"):
+                errors.append(f"{name} must use HTTPS")
+        return errors
 
     @property
     def market_holiday_set(self) -> set[str]:

@@ -347,6 +347,7 @@ class StrategyService:
             ),
             source="strategy_scheduler" if scheduled else "strategy",
             strategy_id=strategy.id,
+            max_quantity=strategy.max_quantity,
         )
 
     async def _run_smc_intraday(

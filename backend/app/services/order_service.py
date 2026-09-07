@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import Request
 from sqlalchemy import select
@@ -9,13 +8,14 @@ from app.brokers.base import OrderRequest as BrokerOrderRequest
 from app.brokers.factory import get_broker_adapter
 from app.core.deps import log_audit
 from app.core.security import generate_secure_token
-from app.models import BrokerConnection, BrokerType, Order, TradingControl, User
+from app.models import BrokerConnection, BrokerType, Order, User
 from app.config import settings
 from app.schemas.trading import PlaceOrderRequest
-from app.services import billing_service
 from app.services.instrument_segments import dhan_exchange_segment
 from app.services.instrument_service import instrument_service
 from app.services.order_status import normalize_broker_status
+from app.services.live_trading import check_live_trading_gates
+from app.services import billing_service
 from app.services.risk import RiskRejection, validate_order
 
 
@@ -35,6 +35,7 @@ class OrderService:
         strategy_id: uuid.UUID | None,
         webhook_id: uuid.UUID | None,
         source: str,
+        request: Request | None = None,
     ) -> Order:
         order = Order(
             user_id=user.id,
@@ -55,6 +56,13 @@ class OrderService:
         )
         db.add(order)
         await db.flush()
+        await log_audit(
+            db,
+            "order.rejected",
+            user.id,
+            request,
+            {"order_id": str(order.id), "reason": reason, "source": source},
+        )
         return order
 
     async def place_order(
@@ -66,28 +74,43 @@ class OrderService:
         source: str = "manual",
         strategy_id: uuid.UUID | None = None,
         webhook_id: uuid.UUID | None = None,
+        max_quantity: int | None = None,
     ) -> Order:
         paper = data.paper_mode or data.broker == "paper"
         try:
-            validate_order(quantity=data.quantity, paper_mode=paper)
+            order_max_quantity = (
+                max_quantity
+                if max_quantity is not None
+                else (settings.live_max_order_quantity if not paper else 10000)
+            )
+            validate_order(
+                quantity=data.quantity,
+                max_quantity=order_max_quantity,
+                paper_mode=paper,
+            )
         except RiskRejection as exc:
-            return await self._reject(db, user, data, exc.reason, strategy_id, webhook_id, source)
+            return await self._reject(db, user, data, exc.reason, strategy_id, webhook_id, source, request)
 
         if not paper:
-            control = await db.get(TradingControl, 1)
-            if not control or control.kill_switch_active:
-                return await self._reject(db, user, data, "Emergency kill switch is active", strategy_id, webhook_id, source)
             # Typed confirmation is a UI guard against accidental clicks. Webhooks and
             # scheduled strategies are already authorized by HMAC / strategy config.
             if source == "manual" and data.live_confirmation != "CONFIRM LIVE ORDER":
-                return await self._reject(db, user, data, "Type CONFIRM LIVE ORDER to authorize this live order", strategy_id, webhook_id, source)
-            if data.broker == "dhan" and not settings.dhan_static_ip.strip():
-                return await self._reject(db, user, data, "Dhan static public IP is not configured and allowlisting is unverified", strategy_id, webhook_id, source)
-            sub = await billing_service.active_subscription(db, user)
-            if not sub:
+                confirmation_reason = "Type CONFIRM LIVE ORDER to authorize this live order"
+                if not await billing_service.active_subscription(db, user):
+                    confirmation_reason += "; Active subscription required for live trading"
+                return await self._reject(db, user, data, confirmation_reason, strategy_id, webhook_id, source, request)
+            gate = await check_live_trading_gates(
+                db,
+                user,
+                data.broker,
+                quantity=data.quantity,
+                side=data.side,
+                price=data.price,
+            )
+            if not gate.allowed:
                 return await self._reject(
-                    db, user, data, "Active subscription required for live trading",
-                    strategy_id, webhook_id, source,
+                    db, user, data, gate.reason or "Live trading gate rejected the order",
+                    strategy_id, webhook_id, source, request,
                 )
 
         order = Order(
@@ -118,8 +141,12 @@ class OrderService:
             return order
 
         if not user.mfa_enabled:
+            # This is retained as a defensive check for callers that construct
+            # an order service request without going through the gate helper.
             order.status = "REJECTED"
             order.message = "Enable MFA in Settings before placing live orders"
+            if request:
+                await log_audit(db, "order.live_rejected", user.id, request, {"order_id": str(order.id), "reason": order.message})
             return order
 
         inst = await instrument_service.resolve(db, order.symbol, order.exchange)
@@ -128,6 +155,7 @@ class OrderService:
         if not inst or not inst.get("security_id"):
             order.status = "REJECTED"
             order.message = f"Unknown instrument {order.symbol} on {order.exchange}"
+            await log_audit(db, "order.rejected", user.id, request, {"order_id": str(order.id), "reason": order.message, "source": source})
             return order
 
         conn_result = await db.execute(
@@ -141,6 +169,7 @@ class OrderService:
         if not connection:
             order.status = "REJECTED"
             order.message = f"No active {data.broker} connection"
+            await log_audit(db, "order.rejected", user.id, request, {"order_id": str(order.id), "reason": order.message, "source": source})
             return order
 
         segment = inst.get("segment") or "EQUITY"

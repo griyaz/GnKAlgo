@@ -296,6 +296,22 @@ class AuthService:
 
 
 class BrokerService:
+    @staticmethod
+    def _validate_credentials(broker: BrokerType, credentials: dict) -> None:
+        token = str(credentials.get("access_token") or credentials.get("api_key") or "").strip()
+        if not token:
+            raise ValueError("Broker access token is required")
+        if broker in {BrokerType.DHAN, BrokerType.FYERS} and not str(
+            credentials.get("client_id") or ""
+        ).strip():
+            raise ValueError(f"{broker.value.upper()} client ID is required")
+        if broker is BrokerType.FYERS and not settings.fyers_api_base_url.startswith("https://"):
+            raise ValueError("FYERS API base URL must use HTTPS")
+        if broker is BrokerType.UPSTOX and not settings.upstox_api_base_url.startswith("https://"):
+            raise ValueError("Upstox API base URL must use HTTPS")
+        if broker is BrokerType.DHAN and not settings.dhan_api_base_url.startswith("https://"):
+            raise ValueError("Dhan API base URL must use HTTPS")
+
     async def connect(
         self,
         db: AsyncSession,
@@ -305,6 +321,7 @@ class BrokerService:
         request: Request,
     ) -> BrokerConnection:
         broker_enum = BrokerType(broker)
+        self._validate_credentials(broker_enum, credentials)
         token = credentials.get("access_token") or credentials.get("api_key") or ""
         if broker_enum == BrokerType.DHAN:
             from app.brokers.dhan import DhanAdapter
@@ -345,6 +362,7 @@ class BrokerService:
             conn.client_id = credentials.get("client_id") or conn.client_id
             conn.is_active = True
             conn.health_status = health
+            conn.last_health_check = datetime.now(timezone.utc)
         else:
             conn = BrokerConnection(
                 user_id=user.id,
@@ -352,6 +370,7 @@ class BrokerService:
                 encrypted_credentials=encrypted,
                 client_id=credentials.get("client_id"),
                 health_status=health,
+                last_health_check=datetime.now(timezone.utc),
             )
             db.add(conn)
 

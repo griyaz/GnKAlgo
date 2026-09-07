@@ -43,9 +43,12 @@ def _ordered(data: list[dict]) -> list[dict]:
 
 
 async def _snapshot_message() -> dict:
-    data = await store.get_snapshot()
+    # Prefer the current worker's in-memory tick when available; it is fresher
+    # than a Redis snapshot left by another worker. Non-leader workers fall
+    # back to Redis for cross-worker fan-out.
+    data = market_manager.local_snapshot()
     if not data:
-        data = market_manager.local_snapshot()
+        data = await store.get_snapshot()
     meta = await store.get_meta() or market_manager.meta_snapshot()
     return {
         "type": "snapshot",
