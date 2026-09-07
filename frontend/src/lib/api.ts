@@ -7,9 +7,18 @@ export function resolveApiBase(): string {
       // 127.0.0.1 UI -> 127.0.0.1 API) and passes the backend CORS check.
       return process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
     }
-    return "";
+
+    // Keep browser requests same-origin in deployed environments. A
+    // NEXT_PUBLIC_API_URL value such as http://localhost:8000 is baked into
+    // the client bundle at build time and is unreachable from a user's
+    // browser; the reverse proxy already routes /api to the backend.
+    const configured = process.env.NEXT_PUBLIC_API_URL?.trim();
+    if (!configured || /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?\/?$/i.test(configured)) {
+      return "";
+    }
+    return configured.replace(/\/+$/, "");
   }
-  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  return process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/+$/, "") || "http://localhost:8000";
 }
 
 export function clearTokens() { /* The server clears authentication cookies. */ }
