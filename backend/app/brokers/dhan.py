@@ -1,8 +1,21 @@
 import httpx
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.brokers.base import BrokerAdapter, OrderRequest, OrderResponse
 from app.config import settings
+
+# Dhan /charts/intraday accepts only these minute buckets.
+_DHAN_INTRADAY_INTERVAL = {
+    "1m": "1",
+    "3m": "1",
+    "5m": "5",
+    "15m": "15",
+    "30m": "15",
+    "1H": "60",
+    "4H": "60",
+}
+_IST = ZoneInfo("Asia/Kolkata")
 
 
 class DhanAdapter(BrokerAdapter):
@@ -135,7 +148,12 @@ class DhanAdapter(BrokerAdapter):
         segment: str,
         interval: str,
     ) -> list[dict]:
-        """Fetch historical OHLC from Dhan charts API."""
+        """Fetch historical OHLC from Dhan charts API.
+
+        Intraday SMC/chart intervals must use ``/charts/intraday`` with an
+        explicit minute bucket. ``/charts/historical`` is daily-only and
+        returns too few bars (and the wrong timeframe) for 5m/15m strategies.
+        """
         seg_map = {
             "INDEX": "IDX_I",
             "EQUITY": "NSE_EQ",
@@ -144,20 +162,35 @@ class DhanAdapter(BrokerAdapter):
         if exchange == "BSE":
             exchange_segment = "BSE_EQ" if segment == "EQUITY" else "IDX_I"
 
-        days = 5 if interval in ("1m", "3m", "5m", "15m", "30m", "1H", "4H") else 365
-        end = datetime.now()
-        start = end - timedelta(days=days)
+        instrument = "INDEX" if segment == "INDEX" else "EQUITY"
+        dhan_interval = _DHAN_INTRADAY_INTERVAL.get(interval)
+        now = datetime.now(_IST)
 
-        payload = {
-            "securityId": str(security_id),
-            "exchangeSegment": exchange_segment,
-            "instrument": "INDEX" if segment == "INDEX" else "EQUITY",
-            "expiryCode": 0,
-            "oi": False,
-            "fromDate": start.strftime("%Y-%m-%d"),
-            "toDate": end.strftime("%Y-%m-%d"),
-        }
-        data = await self._request("POST", "/charts/historical", json=payload)
+        if dhan_interval:
+            start = now - timedelta(days=5)
+            path = "/charts/intraday"
+            payload = {
+                "securityId": str(security_id),
+                "exchangeSegment": exchange_segment,
+                "instrument": instrument,
+                "interval": dhan_interval,
+                "oi": False,
+                "fromDate": start.strftime("%Y-%m-%d %H:%M:%S"),
+                "toDate": now.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        else:
+            start = now - timedelta(days=365)
+            path = "/charts/historical"
+            payload = {
+                "securityId": str(security_id),
+                "exchangeSegment": exchange_segment,
+                "instrument": instrument,
+                "expiryCode": 0,
+                "oi": False,
+                "fromDate": start.strftime("%Y-%m-%d"),
+                "toDate": now.strftime("%Y-%m-%d"),
+            }
+        data = await self._request("POST", path, json=payload)
         opens = data.get("open", []) or []
         highs = data.get("high", []) or []
         lows = data.get("low", []) or []

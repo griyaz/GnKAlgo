@@ -561,3 +561,77 @@ def test_daily_loss_counts_pending_live_orders():
         assert blocked.status_code == 200
         assert blocked.json()["status"] == "FAILED"
         assert "Max daily loss" in blocked.json()["notes"]
+
+
+def test_smc_run_fetches_candles_through_dhan_adapter():
+    """Production SMC used to call get_candles() with no adapter, so it always
+    skipped with insufficient_candles once mock data was disabled."""
+    import json as json_lib
+
+    from sqlalchemy import select
+
+    from app.core.security import encrypt_data
+    from app.database import AsyncSessionLocal
+    from app.models import BrokerConnection, BrokerType, User
+    from app.services.candle_service import candle_service
+
+    captured = {}
+
+    async def fake_get_candles(db, symbol, exchange, interval, adapter=None, count=500):
+        captured["adapter"] = adapter
+        captured["interval"] = interval
+        captured["count"] = count
+        return {"candles": [], "source": "empty"}
+
+    original = candle_service.get_candles
+    candle_service.get_candles = fake_get_candles  # type: ignore[method-assign]
+    try:
+        with TestClient(app) as client:
+            email = f"smccandle-{uuid.uuid4().hex[:8]}@gnkalgo.com"
+            access = _register_login(client, email)
+            auth = {"Authorization": f"Bearer {access}"}
+            created = client.post(
+                "/api/v1/strategies/",
+                headers=auth,
+                json={
+                    "name": "SMC candles",
+                    "symbol": "RELIANCE",
+                    "strategy_type": "smc_intraday",
+                    "timeframe": "5m",
+                    "action": "AUTO",
+                    "qty": 1,
+                    "paper_mode": True,
+                },
+            )
+            assert created.status_code == 200
+            strategy_id = created.json()["id"]
+
+            async def attach_dhan():
+                async with AsyncSessionLocal() as session:
+                    user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+                    session.add(
+                        BrokerConnection(
+                            user_id=user.id,
+                            broker=BrokerType.DHAN,
+                            encrypted_credentials=encrypt_data(
+                                json_lib.dumps({"access_token": "tok", "client_id": "cid"})
+                            ),
+                            client_id="cid",
+                            is_active=True,
+                            health_status="connected",
+                        )
+                    )
+                    await session.commit()
+
+            import asyncio
+
+            asyncio.run(attach_dhan())
+            run = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+            assert run.status_code == 200
+            assert captured.get("adapter") is not None
+            assert captured["adapter"].__class__.__name__ == "DhanAdapter"
+            assert captured["interval"] == "5m"
+            assert captured["count"] == 120
+            assert run.json()["status"] == "SKIPPED"
+    finally:
+        candle_service.get_candles = original  # type: ignore[method-assign]
