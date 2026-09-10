@@ -25,6 +25,28 @@ def test_api_root():
         assert "endpoints" in body
 
 
+def test_core_application_routers_are_mounted():
+    """Prevent replacing app.main with a stub that drops the trading API."""
+    paths = {getattr(route, "path", "") for route in app.routes}
+    required = (
+        "/health",
+        "/health/ready",
+        "/api/v1/auth/login",
+        "/api/v1/auth/register",
+        "/api/v1/orders/",
+        "/api/v1/strategies/",
+        "/api/v1/billing/plans",
+        "/api/v1/market/indices",
+        "/api/v1/profile/",
+        "/api/v1/portfolio/holdings",
+        "/api/v1/alerts/",
+        "/api/v1/webhooks/",
+        "/ws/market/ticker",
+    )
+    missing = [path for path in required if path not in paths]
+    assert not missing, f"core routes missing from app.main: {missing}"
+
+
 def test_register_verify_login():
     with TestClient(app) as client:
         email = f"devtrader-{uuid.uuid4().hex[:8]}@gnkalgo.com"
