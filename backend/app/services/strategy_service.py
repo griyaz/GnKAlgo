@@ -124,6 +124,21 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt
 
 
+def _candle_epoch_seconds(candle_time) -> int | None:
+    """Normalize a candle open time to unix seconds. None if unusable."""
+    if candle_time is None:
+        return None
+    try:
+        ts = int(candle_time)
+    except (TypeError, ValueError):
+        return None
+    if ts > 1_000_000_000_000:
+        ts = int(ts / 1000)
+    if ts < 0:
+        return None
+    return ts
+
+
 class StrategyService:
     async def list_strategies(self, db: AsyncSession, user: User) -> list[Strategy]:
         result = await db.execute(select(Strategy).where(Strategy.user_id == user.id))
@@ -327,6 +342,13 @@ class StrategyService:
             return "Active subscription required for live strategies"
         return None
 
+    def _already_acted_on_bar(self, strategy: Strategy, candle_time) -> bool:
+        """True when this strategy already placed on the same (or newer) candle."""
+        bar_ts = _candle_epoch_seconds(candle_time)
+        if bar_ts is None or strategy.last_signal_bar_ts is None:
+            return False
+        return int(strategy.last_signal_bar_ts) >= bar_ts
+
     async def _place_strategy_order(
         self,
         db: AsyncSession,
@@ -421,6 +443,16 @@ class StrategyService:
                 strategy.last_scheduled_run_at = datetime.now(timezone.utc)
             return run
 
+        # FVG/BOS/OB stay true for the life of the current bar. A 1-minute
+        # schedule on a 15m strategy would otherwise stack MARKET orders.
+        bar_ts = _candle_epoch_seconds(candles[-1].get("time")) if candles else None
+        if self._already_acted_on_bar(strategy, bar_ts):
+            run.status = "SKIPPED"
+            run.notes = f"SMC already acted on this bar: {signal.reason}"
+            if scheduled:
+                strategy.last_scheduled_run_at = datetime.now(timezone.utc)
+            return run
+
         qty = min(rules.qty, strategy.max_quantity)
         try:
             order = await self._place_strategy_order(db, user, strategy, signal.side, qty, scheduled)
@@ -430,6 +462,8 @@ class StrategyService:
             if scheduled:
                 strategy.last_scheduled_run_at = datetime.now(timezone.utc)
             return run
+        if is_successful_placement(order.status) and bar_ts is not None:
+            strategy.last_signal_bar_ts = bar_ts
         run.status = "COMPLETED" if is_successful_placement(order.status) else "FAILED"
         run.notes = (
             f"Order {order.id} status={order.status}; "
