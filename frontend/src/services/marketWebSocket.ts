@@ -43,6 +43,9 @@ class MarketWebSocket {
 
   connect() {
     this.intentionalClose = false;
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
     this.setStatus("CONNECTING");
     const url = `${wsBase()}/api/v1/market/ws`;
     this.ws = new WebSocket(url);
@@ -70,6 +73,7 @@ class MarketWebSocket {
     };
 
     this.ws.onclose = () => {
+      this.ws = null;
       this.setStatus("DISCONNECTED");
       if (!this.intentionalClose) this.scheduleReconnect();
     };
