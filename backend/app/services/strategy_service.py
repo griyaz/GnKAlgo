@@ -8,7 +8,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Order, Strategy, StrategyRun, StrategyVersion, User
+from app.brokers.factory import get_broker_adapter
+from app.models import BrokerConnection, BrokerType, Order, Strategy, StrategyRun, StrategyVersion, User
 
 logger = logging.getLogger(__name__)
 from app.schemas.trading import (
@@ -358,6 +359,27 @@ class StrategyService:
             max_quantity=strategy.max_quantity,
         )
 
+    async def _candle_adapter(self, db: AsyncSession, user: User):
+        """Prefer a broker that can actually return OHLC (Dhan, then Upstox)."""
+        for broker in (BrokerType.DHAN, BrokerType.UPSTOX):
+            result = await db.execute(
+                select(BrokerConnection).where(
+                    BrokerConnection.user_id == user.id,
+                    BrokerConnection.broker == broker,
+                    BrokerConnection.is_active.is_(True),
+                )
+            )
+            connection = result.scalar_one_or_none()
+            if not connection:
+                continue
+            try:
+                adapter = get_broker_adapter(connection)
+            except Exception:
+                continue
+            if hasattr(adapter, "get_historical_candles"):
+                return adapter
+        return None
+
     async def _run_smc_intraday(
         self,
         db: AsyncSession,
@@ -368,12 +390,14 @@ class StrategyService:
         scheduled: bool,
     ) -> StrategyRun:
         try:
+            adapter = await self._candle_adapter(db, user)
             candle_data = await candle_service.get_candles(
                 db,
                 strategy.symbol,
                 "NSE",
                 rules.timeframe,
                 count=120,
+                adapter=adapter,
             )
             candles = candle_data.get("candles", [])
             signal = evaluate_smc_intraday(
