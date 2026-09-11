@@ -635,3 +635,149 @@ def test_smc_run_fetches_candles_through_dhan_adapter():
             assert run.json()["status"] == "SKIPPED"
     finally:
         candle_service.get_candles = original  # type: ignore[method-assign]
+
+
+def _bullish_fvg_candles(bar_time: int) -> list[dict]:
+    candles = []
+    for i in range(12):
+        candles.append(
+            {
+                "time": bar_time - (11 - i) * 900,
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.5,
+            }
+        )
+    candles[-3]["high"] = 102.0
+    candles[-2]["low"] = 101.5
+    candles[-1]["low"] = 103.0
+    candles[-1]["close"] = 103.5
+    candles[-1]["high"] = 104.0
+    return candles
+
+
+def test_smc_does_not_restack_orders_on_the_same_bar():
+    """Scheduled SMC re-evaluates while FVG/BOS/OB is still true on the current
+    bar. Without a same-bar guard that stacks MARKET orders every tick."""
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import Order
+    from app.services.candle_service import candle_service
+
+    bar_time = int(datetime.now(timezone.utc).timestamp()) - 60
+    candles = _bullish_fvg_candles(bar_time)
+
+    async def fake_get_candles(db, symbol, exchange, interval, adapter=None, count=500):
+        return {"candles": candles, "source": "test"}
+
+    original = candle_service.get_candles
+    candle_service.get_candles = fake_get_candles  # type: ignore[method-assign]
+    try:
+        with TestClient(app) as client:
+            access = _register_login(client, f"smcbar-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+            auth = {"Authorization": f"Bearer {access}"}
+            created = client.post(
+                "/api/v1/strategies/",
+                headers=auth,
+                json={
+                    "name": "SMC same bar",
+                    "symbol": "RELIANCE",
+                    "strategy_type": "smc_intraday",
+                    "timeframe": "15m",
+                    "action": "AUTO",
+                    "qty": 1,
+                    "paper_mode": True,
+                },
+            )
+            assert created.status_code == 200
+            strategy_id = created.json()["id"]
+
+            first = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+            assert first.status_code == 200
+            assert first.json()["status"] == "COMPLETED"
+            assert "Order" in first.json()["notes"]
+
+            second = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+            assert second.status_code == 200
+            assert second.json()["status"] == "SKIPPED"
+            assert "already acted on this bar" in second.json()["notes"]
+
+            async def count_orders():
+                async with AsyncSessionLocal() as session:
+                    return len(
+                        list(
+                            (
+                                await session.execute(
+                                    select(Order).where(Order.strategy_id == uuid.UUID(strategy_id))
+                                )
+                            ).scalars()
+                        )
+                    )
+
+            import asyncio
+
+            assert asyncio.run(count_orders()) == 1
+    finally:
+        candle_service.get_candles = original  # type: ignore[method-assign]
+
+
+def test_smc_can_trade_again_on_a_new_bar():
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import Order
+    from app.services.candle_service import candle_service
+
+    first_bar = int(datetime.now(timezone.utc).timestamp()) - 1800
+    candles_holder = {"candles": _bullish_fvg_candles(first_bar)}
+
+    async def fake_get_candles(db, symbol, exchange, interval, adapter=None, count=500):
+        return {"candles": candles_holder["candles"], "source": "test"}
+
+    original = candle_service.get_candles
+    candle_service.get_candles = fake_get_candles  # type: ignore[method-assign]
+    try:
+        with TestClient(app) as client:
+            access = _register_login(client, f"smcnewbar-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+            auth = {"Authorization": f"Bearer {access}"}
+            created = client.post(
+                "/api/v1/strategies/",
+                headers=auth,
+                json={
+                    "name": "SMC new bar",
+                    "symbol": "RELIANCE",
+                    "strategy_type": "smc_intraday",
+                    "timeframe": "15m",
+                    "action": "AUTO",
+                    "qty": 1,
+                    "paper_mode": True,
+                },
+            )
+            strategy_id = created.json()["id"]
+            first = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+            assert first.json()["status"] == "COMPLETED"
+
+            candles_holder["candles"] = _bullish_fvg_candles(first_bar + 900)
+            second = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+            assert second.status_code == 200
+            assert second.json()["status"] == "COMPLETED"
+
+            async def count_orders():
+                async with AsyncSessionLocal() as session:
+                    return len(
+                        list(
+                            (
+                                await session.execute(
+                                    select(Order).where(Order.strategy_id == uuid.UUID(strategy_id))
+                                )
+                            ).scalars()
+                        )
+                    )
+
+            import asyncio
+
+            assert asyncio.run(count_orders()) == 2
+    finally:
+        candle_service.get_candles = original  # type: ignore[method-assign]

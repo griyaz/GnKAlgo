@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from app.services.backtest_service import run_backtest
-from app.services.strategy_service import StrategyService
+from app.services.strategy_service import StrategyService, _candle_epoch_seconds
 
 
 def test_backtest_fills_after_signal_candle_without_lookahead():
@@ -64,3 +64,19 @@ def test_scheduler_does_not_treat_draft_live_strategies_as_due():
     assert svc.is_due(_scheduled("PAPER", paper_mode=False), now) is False
     assert svc.is_due(_scheduled("PAPER", paper_mode=True), now) is True
     assert svc.is_due(_scheduled("LIVE", paper_mode=False), now) is True
+
+
+def test_candle_epoch_seconds_normalizes_millis():
+    assert _candle_epoch_seconds(1_710_000_000_000) == 1_710_000_000
+    assert _candle_epoch_seconds(1_710_000_000) == 1_710_000_000
+    assert _candle_epoch_seconds(None) is None
+    assert _candle_epoch_seconds("nope") is None
+
+
+def test_smc_same_bar_guard_compares_stored_candle_time():
+    svc = StrategyService()
+    strategy = SimpleNamespace(last_signal_bar_ts=1_710_000_000)
+    assert svc._already_acted_on_bar(strategy, 1_710_000_000) is True
+    assert svc._already_acted_on_bar(strategy, 1_710_000_000 - 900) is True
+    assert svc._already_acted_on_bar(strategy, 1_710_000_000 + 900) is False
+    assert svc._already_acted_on_bar(SimpleNamespace(last_signal_bar_ts=None), 1_710_000_000) is False

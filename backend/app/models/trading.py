@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, Uuid, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, Uuid, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -90,6 +90,7 @@ class Strategy(Base):
     schedule_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     interval_minutes: Mapped[int] = mapped_column(Integer, default=0)
     last_scheduled_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_signal_bar_ts: Mapped[int | None] = mapped_column(BigInteger)
     current_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     paper_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
