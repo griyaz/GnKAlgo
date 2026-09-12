@@ -98,3 +98,144 @@ def test_curated_instrument_feed_keys_are_deduplicated_before_upsert():
     ]
     unique = deduplicate_feed_rows(rows)
     assert [row["symbol"] for row in unique] == ["NIFTY50"]
+
+
+def test_parse_csv_keeps_es_vs_deb_instrument_type():
+    ncd = parse_csv_row(
+        {
+            "SEM_EXM_EXCH_ID": "NSE",
+            "SEM_SEGMENT": "E",
+            "SEM_SMST_SECURITY_ID": "25510",
+            "SEM_INSTRUMENT_NAME": "EQUITY",
+            "SEM_TRADING_SYMBOL": "MOTHERSON",
+            "SEM_CUSTOM_SYMBOL": "SMIL-6.5%-20092027-NCD",
+            "SEM_EXPIRY_DATE": "",
+            "SEM_STRIKE_PRICE": "",
+            "SEM_OPTION_TYPE": "XX",
+            "SEM_LOT_UNITS": "1.0",
+            "SEM_TICK_SIZE": "5.0000",
+            "SEM_EXCH_INSTRUMENT_TYPE": "DEB",
+            "SM_SYMBOL_NAME": "SAMVARDHANA MOTHERSON INT",
+        }
+    )
+    equity = parse_csv_row(
+        {
+            "SEM_EXM_EXCH_ID": "NSE",
+            "SEM_SEGMENT": "E",
+            "SEM_SMST_SECURITY_ID": "4204",
+            "SEM_INSTRUMENT_NAME": "EQUITY",
+            "SEM_TRADING_SYMBOL": "MOTHERSON",
+            "SEM_CUSTOM_SYMBOL": "Samvardhana Motherson International",
+            "SEM_EXPIRY_DATE": "",
+            "SEM_STRIKE_PRICE": "",
+            "SEM_OPTION_TYPE": "XX",
+            "SEM_LOT_UNITS": "1.0",
+            "SEM_TICK_SIZE": "1.0000",
+            "SEM_EXCH_INSTRUMENT_TYPE": "ES",
+            "SM_SYMBOL_NAME": "SAMVRDHNA MTHRSN INTL LTD",
+        }
+    )
+    assert ncd is not None and equity is not None
+    assert ncd["symbol"] == equity["symbol"] == "MOTHERSON"
+    assert ncd["instrument_type"] == "DEB"
+    assert equity["instrument_type"] == "ES"
+    assert ncd["security_id"] == "25510"
+    assert equity["security_id"] == "4204"
+
+
+def test_get_prefers_cash_equity_over_ncd_with_same_ticker():
+    """Dhan lists MOTHERSON/CHOLAFIN NCDs before the EQ share. Orders must
+    still resolve to the cash stock, not the bond."""
+
+    async def _run():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        ncd = parse_csv_row(
+            {
+                "SEM_EXM_EXCH_ID": "NSE",
+                "SEM_SEGMENT": "E",
+                "SEM_SMST_SECURITY_ID": "25510",
+                "SEM_INSTRUMENT_NAME": "EQUITY",
+                "SEM_TRADING_SYMBOL": "MOTHERSON",
+                "SEM_CUSTOM_SYMBOL": "SMIL-6.5%-20092027-NCD",
+                "SEM_EXPIRY_DATE": "",
+                "SEM_STRIKE_PRICE": "",
+                "SEM_OPTION_TYPE": "XX",
+                "SEM_LOT_UNITS": "1.0",
+                "SEM_TICK_SIZE": "5.0000",
+                "SEM_EXCH_INSTRUMENT_TYPE": "DEB",
+                "SM_SYMBOL_NAME": "SAMVARDHANA MOTHERSON INT",
+            }
+        )
+        equity = parse_csv_row(
+            {
+                "SEM_EXM_EXCH_ID": "NSE",
+                "SEM_SEGMENT": "E",
+                "SEM_SMST_SECURITY_ID": "4204",
+                "SEM_INSTRUMENT_NAME": "EQUITY",
+                "SEM_TRADING_SYMBOL": "MOTHERSON",
+                "SEM_CUSTOM_SYMBOL": "Samvardhana Motherson International",
+                "SEM_EXPIRY_DATE": "",
+                "SEM_STRIKE_PRICE": "",
+                "SEM_OPTION_TYPE": "XX",
+                "SEM_LOT_UNITS": "1.0",
+                "SEM_TICK_SIZE": "1.0000",
+                "SEM_EXCH_INSTRUMENT_TYPE": "ES",
+                "SM_SYMBOL_NAME": "SAMVRDHNA MTHRSN INTL LTD",
+            }
+        )
+        cholafin_ncd = parse_csv_row(
+            {
+                "SEM_EXM_EXCH_ID": "NSE",
+                "SEM_SEGMENT": "E",
+                "SEM_SMST_SECURITY_ID": "19257",
+                "SEM_INSTRUMENT_NAME": "EQUITY",
+                "SEM_TRADING_SYMBOL": "CHOLAFIN",
+                "SEM_CUSTOM_SYMBOL": "CIFCL-7.5%-30092026-NCD",
+                "SEM_EXPIRY_DATE": "",
+                "SEM_STRIKE_PRICE": "",
+                "SEM_OPTION_TYPE": "XX",
+                "SEM_LOT_UNITS": "1.0",
+                "SEM_TICK_SIZE": "5.0000",
+                "SEM_EXCH_INSTRUMENT_TYPE": "DEB",
+                "SM_SYMBOL_NAME": "CHOLAMANDALAM IN & FIN CO",
+            }
+        )
+        cholafin_eq = parse_csv_row(
+            {
+                "SEM_EXM_EXCH_ID": "NSE",
+                "SEM_SEGMENT": "E",
+                "SEM_SMST_SECURITY_ID": "685",
+                "SEM_INSTRUMENT_NAME": "EQUITY",
+                "SEM_TRADING_SYMBOL": "CHOLAFIN",
+                "SEM_CUSTOM_SYMBOL": "Cholamandalam Investment",
+                "SEM_EXPIRY_DATE": "",
+                "SEM_STRIKE_PRICE": "",
+                "SEM_OPTION_TYPE": "XX",
+                "SEM_LOT_UNITS": "1.0",
+                "SEM_TICK_SIZE": "10.0000",
+                "SEM_EXCH_INSTRUMENT_TYPE": "ES",
+                "SM_SYMBOL_NAME": "CHOLAMANDALAM IN & FIN CO",
+            }
+        )
+        async with factory() as session:
+            # NCD rows first, matching Dhan compact CSV order.
+            await instrument_sync_service._upsert_batch(
+                session, [ncd, cholafin_ncd, equity, cholafin_eq]
+            )
+            motherson = await instrument_service.get(session, "MOTHERSON", "NSE")
+            assert motherson is not None
+            assert motherson["security_id"] == "4204"
+            assert motherson["instrument_type"] == "ES"
+            resolved = await instrument_service.resolve(session, "MOTHERSON", "NSE")
+            assert resolved["security_id"] == "4204"
+            cholafin = await instrument_service.get(session, "CHOLAFIN", "NSE")
+            assert cholafin is not None
+            assert cholafin["security_id"] == "685"
+            hits = await instrument_service.search(session, "MOTHERSON", limit=5)
+            assert hits[0]["security_id"] == "4204"
+        await engine.dispose()
+
+    asyncio.run(_run())
