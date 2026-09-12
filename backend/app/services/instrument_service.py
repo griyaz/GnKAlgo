@@ -37,6 +37,22 @@ def _to_dict(inst: Instrument) -> dict:
     }
 
 
+# Dhan's compact master reuses equity tickers for NCDs/warrants (MOTHERSON,
+# CHOLAFIN, ELECTCAST). Cash shares are ES; curated seed uses EQUITY/INDEX.
+_CASH_INSTRUMENT_TYPES = frozenset({"ES", "EQ", "EQUITY", "INDEX"})
+_NON_CASH_INSTRUMENT_TYPES = frozenset({"DEB", "CB", "NCD", "W1"})
+
+
+def _spot_rank(inst: Instrument) -> tuple[int, int, int, str]:
+    """Lower is better. Prefer cash equity/index over debt, warrants, and F&O."""
+    itype = (inst.instrument_type or "").upper()
+    segment = (inst.segment or "").upper()
+    non_cash = 0 if itype not in _NON_CASH_INSTRUMENT_TYPES else 1
+    cash_type = 0 if itype in _CASH_INSTRUMENT_TYPES or segment == "INDEX" else 1
+    derivatives = 0 if segment not in {"FNO", "FUTURES", "OPTIONS"} else 1
+    return (non_cash, cash_type, derivatives, inst.security_id)
+
+
 class InstrumentService:
     async def count(self, db: AsyncSession) -> int:
         result = await db.scalar(
@@ -90,14 +106,16 @@ class InstrumentService:
         result = await db.execute(stmt)
         items = result.scalars().all()
 
-        # Rank: exact > prefix > contains
-        def rank(inst: Instrument) -> tuple[int, str]:
+        # Rank: exact > prefix > contains, cash equity/index before NCD/warrants
+        def rank(inst: Instrument) -> tuple[int, int, int, int, str]:
             sym = inst.symbol
             if sym == key:
-                return (0, sym)
-            if sym.startswith(key):
-                return (1, sym)
-            return (2, sym)
+                match = 0
+            elif sym.startswith(key):
+                match = 1
+            else:
+                match = 2
+            return (match, *_spot_rank(inst))
 
         ranked = sorted(items, key=rank)
         seen: set[str] = set()
@@ -120,8 +138,11 @@ class InstrumentService:
             stmt = stmt.where(Instrument.exchange == exchange.upper())
         stmt = stmt.order_by(Instrument.exchange)
         result = await db.execute(stmt)
-        inst = result.scalars().first()
-        return _to_dict(inst) if inst else None
+        rows = list(result.scalars().all())
+        if not rows:
+            return None
+        inst = min(rows, key=_spot_rank)
+        return _to_dict(inst)
 
     async def get_by_security_id(
         self,
