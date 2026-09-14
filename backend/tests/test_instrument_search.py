@@ -6,7 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.database import Base
 from app.services.instrument_csv_parser import parse_csv_row
 from app.services.instrument_service import instrument_service
-from app.services.instrument_sync_service import deduplicate_feed_rows, instrument_sync_service
+from app.services.instrument_sync_service import (
+    deduplicate_feed_rows,
+    incomplete_instrument_feed,
+    instrument_sync_service,
+)
 
 
 def test_parse_csv_equity_row():
@@ -91,6 +95,88 @@ def test_ingest_sample_csv():
         await engine.dispose()
 
     asyncio.run(_run())
+
+
+def test_incomplete_instrument_feed_detects_truncated_scrip_master():
+    assert incomplete_instrument_feed(
+        parsed_count=200, active_count=50_000, stale_count=49_800, previous_success_count=50_000
+    ) is True
+    # Weekly F&O expiry can drop the file without being a truncated download.
+    assert incomplete_instrument_feed(
+        parsed_count=38_000, active_count=50_000, stale_count=12_000, previous_success_count=50_000
+    ) is False
+    assert incomplete_instrument_feed(parsed_count=4, active_count=4, stale_count=0) is False
+
+
+def test_truncated_csv_does_not_deactivate_existing_instruments():
+    """A short/partial Dhan CSV used to mark every unseen NSE/BSE row inactive."""
+    truncated = (
+        "SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,"
+        "SEM_TRADING_SYMBOL,SEM_CUSTOM_SYMBOL,SEM_EXCH_INSTRUMENT_TYPE\n"
+        "NSE,E,2885,EQUITY,RELIANCE,Reliance Industries,ES\n"
+    )
+
+    async def _run():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as session:
+            await instrument_sync_service.seed_from_curated(session)
+            before = await instrument_service.get(session, "TCS", "NSE")
+            assert before is not None
+            try:
+                await instrument_sync_service._ingest_csv(session, truncated)
+            except RuntimeError as exc:
+                assert "incomplete" in str(exc).lower()
+            else:
+                raise AssertionError("partial CSV must not mass-deactivate the instrument universe")
+            after = await instrument_service.get(session, "TCS", "NSE")
+            assert after is not None
+            assert after["security_id"] == "11536"
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def _equity_csv(symbols: list[tuple[str, str]]) -> str:
+    header = (
+        "SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_SMST_SECURITY_ID,SEM_INSTRUMENT_NAME,"
+        "SEM_TRADING_SYMBOL,SEM_CUSTOM_SYMBOL,SEM_EXCH_INSTRUMENT_TYPE"
+    )
+    rows = [
+        f"NSE,E,{sid},EQUITY,{sym},{sym},ES" for sid, sym in symbols
+    ]
+    return header + "\n" + "\n".join(rows) + "\n"
+
+
+def test_complete_csv_still_deactivates_delisted_row():
+    symbols = [(str(10_000 + i), f"SYM{i:03d}") for i in range(60)]
+
+    async def _run():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as session:
+            upserted, deactivated = await instrument_sync_service._ingest_csv(
+                session, _equity_csv(symbols)
+            )
+            assert upserted == 60
+            assert deactivated == 0
+            assert await instrument_service.get(session, "SYM059", "NSE") is not None
+            upserted, deactivated = await instrument_sync_service._ingest_csv(
+                session, _equity_csv(symbols[:-1])
+            )
+            assert upserted == 59
+            assert deactivated == 1
+            assert await instrument_service.get(session, "SYM059", "NSE") is None
+            assert await instrument_service.get(session, "SYM000", "NSE") is not None
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_curated_instrument_feed_keys_are_deduplicated_before_upsert():
     rows = [
         {"exchange": "NSE", "exchange_segment": "IDX_I", "security_id": "13", "symbol": "NIFTY50"},
