@@ -17,6 +17,26 @@ from app.services.instrument_csv_parser import parse_csv_row
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 500
+# Compare this feed to the last known-good ingest (or current active count on
+# first sync). Weekly F&O expiry can drop the file a lot; a truncated download
+# or schema drift that only parses a handful of rows cannot.
+_MIN_FEED_KEEP_FRACTION = 0.5
+_MIN_FEED_ABS_FLOOR = 50
+
+
+def incomplete_instrument_feed(
+    parsed_count: int,
+    active_count: int,
+    stale_count: int,
+    previous_success_count: int = 0,
+) -> bool:
+    """Return True when deactivating unseen rows would look like a truncated feed."""
+    if stale_count <= 0 or parsed_count <= 0:
+        return False
+    baseline = previous_success_count or active_count
+    if baseline <= 0:
+        return False
+    return parsed_count < max(_MIN_FEED_ABS_FLOOR, int(baseline * _MIN_FEED_KEEP_FRACTION))
 
 
 def deduplicate_feed_rows(rows: list[dict]) -> list[dict]:
@@ -143,11 +163,29 @@ class InstrumentSyncService:
                     Instrument.is_active.is_(True),
                 )
             )
+            active = list(result.scalars())
             stale_ids = []
-            for inst in result.scalars():
+            for inst in active:
                 key = f"{inst.exchange}:{inst.exchange_segment}:{inst.security_id}"
                 if key not in seen_keys:
                     stale_ids.append(inst.id)
+            previous_success = await db.scalar(
+                select(InstrumentSyncRun.rows_upserted)
+                .where(InstrumentSyncRun.status == InstrumentSyncStatus.SUCCESS.value)
+                .order_by(InstrumentSyncRun.finished_at.desc())
+                .limit(1)
+            )
+            if incomplete_instrument_feed(
+                len(seen_keys),
+                len(active),
+                len(stale_ids),
+                previous_success_count=int(previous_success or 0),
+            ):
+                raise RuntimeError(
+                    "Instrument CSV looks incomplete "
+                    f"({len(seen_keys)} parsed keys, {len(active)} active, "
+                    f"{len(stale_ids)} would be deactivated); refusing mass deactivation"
+                )
             if stale_ids:
                 await db.execute(
                     update(Instrument).where(Instrument.id.in_(stale_ids)).values(is_active=False)
