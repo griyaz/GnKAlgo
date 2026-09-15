@@ -20,9 +20,10 @@ from app.schemas.trading import (
     StrategyUpdateRequest,
 )
 from app.services import billing_service
-from app.services.candle_service import BASE_PRICES, candle_service
+from app.services.candle_service import candle_service
 from app.services.order_service import order_service
 from app.services.order_status import DEPLOYED_ORDER_STATUSES, is_successful_placement
+from app.services.risk import notional_price
 from app.services.strategy_evaluators.smc_intraday import evaluate_smc_intraday
 
 ParsedRules = StrategyRules | SmcIntradayRules
@@ -314,7 +315,7 @@ class StrategyService:
         )
         cashflow = 0.0
         for order in result.scalars():
-            px = float(order.price or BASE_PRICES.get(order.symbol, 0) or 0)
+            px = notional_price(order.symbol, order.price)
             notional = order.quantity * px
             cashflow += -notional if order.side == "BUY" else notional
         return -cashflow if cashflow < 0 else 0.0

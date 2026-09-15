@@ -106,6 +106,7 @@ class OrderService:
                 quantity=data.quantity,
                 side=data.side,
                 price=data.price,
+                symbol=data.symbol,
             )
             if not gate.allowed:
                 return await self._reject(
