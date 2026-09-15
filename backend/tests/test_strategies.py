@@ -306,7 +306,7 @@ def test_scheduled_runner_continues_after_corrupt_rules():
         assert any("Invalid strategy rules" in (run.notes or "") for run in bad_runs)
 
 
-def _insert_strategy_order(strategy_id, user_id, status: str, price: float = 2500.0):
+def _insert_strategy_order(strategy_id, user_id, status: str, price: float | None = 2500.0):
     from app.database import AsyncSessionLocal
     from app.models import Order
 
@@ -369,6 +369,49 @@ def test_daily_loss_blocks_after_live_traded_or_pending_order():
         import asyncio
 
         _insert_strategy_order(strategy_id, asyncio.run(user_id()), "TRADED", price=2500)
+
+        blocked = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+        assert blocked.status_code == 200
+        assert blocked.json()["status"] == "FAILED"
+        assert "Max daily loss" in blocked.json()["notes"]
+
+
+def test_daily_loss_counts_market_orders_with_no_fill_price():
+    """SMC/Quick Order MARKET fills persist price=None. Those must still trip the cap."""
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import User
+    from app.services.candle_service import BASE_PRICES
+
+    with TestClient(app) as client:
+        email = f"mktloss-{uuid.uuid4().hex[:8]}@gnkalgo.com"
+        access = _register_login(client, email)
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Market cap",
+                "symbol": "RELIANCE",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "max_daily_loss": 1000,
+            },
+        )
+        assert created.status_code == 200
+        strategy_id = uuid.UUID(created.json()["id"])
+
+        async def user_id():
+            async with AsyncSessionLocal() as session:
+                user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+                return user.id
+
+        import asyncio
+
+        assert BASE_PRICES["RELIANCE"] > 1000
+        _insert_strategy_order(strategy_id, asyncio.run(user_id()), "TRADED", price=None)
 
         blocked = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
         assert blocked.status_code == 200

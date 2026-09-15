@@ -21,6 +21,7 @@ from app.core.security import decrypt_data
 from app.models import BrokerConnection, BrokerType, Order, TradingControl, User
 from app.services import billing_service
 from app.services.order_status import DEPLOYED_ORDER_STATUSES
+from app.services.risk import notional_price
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ async def check_live_trading_gates(
     quantity: int,
     side: str | None = None,
     price: float | None = None,
+    symbol: str | None = None,
 ) -> LiveGateResult:
     """Evaluate all non-order-specific gates before a broker call is possible."""
     if not user.is_active:
@@ -137,9 +139,9 @@ async def check_live_trading_gates(
     if health_error:
         return LiveGateResult(False, health_error)
 
-    # A conservative daily loss guard protects direct orders as well as
-    # strategies.  Unknown market prices are not invented here; the quantity
-    # and per-order limits still apply.
+    # Conservative daily-loss guard for direct orders and strategies. MARKET
+    # orders have no limit price on the wire, so notional_price() substitutes
+    # LTP / curated base / a non-zero fallback instead of counting them as 0.
     from zoneinfo import ZoneInfo
 
     now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -155,12 +157,12 @@ async def check_live_trading_gates(
     )
     daily_loss = 0.0
     for order in orders.scalars():
-        if order.price:
-            cashflow = float(order.price) * order.quantity
-            daily_loss += cashflow if order.side == "BUY" else -cashflow
+        cashflow = notional_price(order.symbol, order.price) * order.quantity
+        daily_loss += cashflow if order.side == "BUY" else -cashflow
     projected_loss = daily_loss
-    if price:
-        projected_loss += float(price) * quantity if side == "BUY" else -float(price) * quantity
+    if side:
+        incoming_px = notional_price(symbol or "", price)
+        projected_loss += incoming_px * quantity if side == "BUY" else -incoming_px * quantity
     if projected_loss >= settings.live_daily_loss_limit:
         return LiveGateResult(False, f"Daily live risk limit {settings.live_daily_loss_limit:g} reached")
     return LiveGateResult(True)
