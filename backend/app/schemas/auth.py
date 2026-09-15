@@ -114,3 +114,21 @@ class BrokerConnectionResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class FyersCallbackRequest(BaseModel):
+    auth_code: str = Field(min_length=1, max_length=2048)
+    state: str = Field(min_length=16, max_length=512)
+
+
+class FyersLoginResponse(BaseModel):
+    authorization_url: str
+    expires_in: int
+
+
+class FyersConnectionStatus(BaseModel):
+    broker: str
+    status: Literal["connected", "disconnected", "error"]
+    client_id: str | None = None
+    health_status: str
+    last_health_check: datetime | None = None

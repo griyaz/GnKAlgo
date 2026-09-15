@@ -1,169 +1,78 @@
-"""FYERS OAuth2 authentication flow.
+"""FYERS API v3 OAuth helpers.
 
-Replaces static token-based auth with OAuth2 for better security:
-- Short-lived access tokens (15 min)
-- Long-lived refresh tokens (30 days)
-- Automatic token refresh
-- Revocation support
+FYERS v3 uses ``generate-authcode`` followed by ``validate-authcode``.
+The token request contains ``appIdHash = SHA256(client_id + ':' + secret_key)``.
+Secrets and upstream response bodies are intentionally never included in errors.
 """
 
-import httpx
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from urllib.parse import urlencode
+
+import httpx
 
 from app.config import settings
-from app.core.security import encrypt_data, decrypt_data
+from app.core.security import decrypt_data, encrypt_data
+
+
+class FyersOAuthError(RuntimeError):
+    """A safe, user-facing OAuth failure without upstream credentials."""
 
 
 class FyersOAuth2:
-    """Handle FYERS OAuth2 token exchange and refresh."""
-    
-    OAUTH_BASE = "https://api-t1.fyers.in/oauth2"
-    API_BASE = "https://api-t1.fyers.in/api/v3"
-    
-    def __init__(self, client_id: str, client_secret: str, redirect_uri: str | None = None):
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.redirect_uri = redirect_uri or f"{settings.api_base_url}/auth/brokers/fyers/callback"
-    
+    AUTH_URL = "https://api-t1.fyers.in/api/v3/generate-authcode"
+    TOKEN_URL = "https://api-t1.fyers.in/api/v3/validate-authcode"
+
+    def __init__(self, client_id: str | None = None, client_secret: str | None = None, redirect_uri: str | None = None):
+        self.client_id = client_id or settings.fyers_client_id
+        self.client_secret = client_secret or settings.fyers_secret_key
+        self.redirect_uri = redirect_uri or settings.fyers_redirect_url
+
     def get_auth_url(self, state: str) -> str:
-        """Generate FYERS OAuth login URL.
-        
-        User navigates to this URL, logs in, authorizes app → redirected to callback.
-        """
-        return (
-            f"{self.OAUTH_BASE}/authorize?"
-            f"client_id={self.client_id}&"
-            f"redirect_uri={self.redirect_uri}&"
-            f"scope=order,holdings,positions&"
-            f"state={state}&"
-            f"response_type=code"
-        )
-    
+        if not self.client_id or not self.redirect_uri:
+            raise FyersOAuthError("FYERS OAuth is not configured")
+        return f"{self.AUTH_URL}?{urlencode({'client_id': self.client_id, 'redirect_uri': self.redirect_uri, 'response_type': 'code', 'state': state})}"
+
+    def app_id_hash(self) -> str:
+        if not self.client_id or not self.client_secret:
+            raise FyersOAuthError("FYERS OAuth is not configured")
+        return hashlib.sha256(f"{self.client_id}:{self.client_secret}".encode()).hexdigest()
+
     async def exchange_code_for_token(self, auth_code: str) -> dict:
-        """Exchange authorization code for access + refresh tokens.
-        
-        Called by callback handler after user authorizes.
-        """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.OAUTH_BASE}/token",
-                json={
-                    "grant_type": "authorization_code",
-                    "code": auth_code,
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "redirect_uri": self.redirect_uri,
-                }
-            )
-            if response.status_code != 200:
-                raise RuntimeError(f"OAuth token exchange failed: {response.text}")
-            
+        payload = {"grant_type": "authorization_code", "appIdHash": self.app_id_hash(), "code": auth_code}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+                response = await client.post(self.TOKEN_URL, json=payload)
+        except httpx.HTTPError as exc:
+            raise FyersOAuthError("FYERS authorization service is unavailable") from exc
+        if response.status_code != 200:
+            raise FyersOAuthError("FYERS authorization was rejected")
+        try:
             data = response.json()
-            return {
-                "access_token": data["access_token"],
-                "refresh_token": data["refresh_token"],
-                "expires_in": data.get("expires_in", 900),  # 15 min default
-                "token_type": data.get("token_type", "Bearer"),
-            }
-    
-    async def refresh_access_token(self, refresh_token: str) -> dict:
-        """Refresh expired access token using refresh token.
-        
-        Called automatically before token expires.
-        """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.OAUTH_BASE}/token",
-                json={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token,
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                }
-            )
-            if response.status_code != 200:
-                raise RuntimeError(f"Token refresh failed: {response.text}")
-            
-            data = response.json()
-            return {
-                "access_token": data["access_token"],
-                "refresh_token": data.get("refresh_token", refresh_token),  # Might be same
-                "expires_in": data.get("expires_in", 900),
-            }
-    
-    async def revoke_token(self, refresh_token: str) -> bool:
-        """Revoke refresh token (logout).
-        
-        Called when user disconnects broker.
-        """
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.OAUTH_BASE}/revoke",
-                json={
-                    "token": refresh_token,
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                }
-            )
-            return response.status_code == 200
+        except ValueError as exc:
+            raise FyersOAuthError("FYERS returned an invalid authorization response") from exc
+        if not isinstance(data, dict) or data.get("s") == "error" or not data.get("access_token"):
+            raise FyersOAuthError("FYERS authorization was rejected")
+        return {
+            "access_token": str(data["access_token"]),
+            "expires_in": int(data.get("expires_in", 86400)),
+            "token_type": str(data.get("token_type", "Bearer")),
+            "client_id": self.client_id,
+        }
 
 
 class FyersTokenStore:
-    """Store Fyers OAuth tokens in BrokerConnection with refresh logic.
-    
-    Schema:
-    {
-        "access_token": "...",
-        "refresh_token": "...",
-        "expires_at": "2026-09-10T12:30:00Z",  # ISO 8601
-        "token_type": "Bearer",
-        "client_id": "ABCD1234-100"
-    }
-    """
-    
     @staticmethod
-    def store_tokens(access_token: str, refresh_token: str, expires_in: int, 
-                     client_id: str) -> str:
-        """Serialize and encrypt tokens for storage in DB."""
-        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
-        data = {
+    def store_tokens(access_token: str, expires_in: int, client_id: str) -> str:
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=max(1, expires_in))
+        return encrypt_data(json.dumps({
             "access_token": access_token,
-            "refresh_token": refresh_token,
-            "expires_at": expires_at,
+            "expires_at": expires_at.isoformat(),
             "token_type": "Bearer",
             "client_id": client_id,
-        }
-        return encrypt_data(json.dumps(data))
-    
+        }))
+
     @staticmethod
     def load_tokens(encrypted: str) -> dict:
-        """Decrypt and deserialize tokens from DB."""
         return json.loads(decrypt_data(encrypted))
-    
-    @staticmethod
-    def is_token_expired(encrypted: str) -> bool:
-        """Check if access token has expired or is close to expiring (5 min buffer)."""
-        tokens = FyersTokenStore.load_tokens(encrypted)
-        expires_at = datetime.fromisoformat(tokens["expires_at"])
-        # Consider expired if < 5 minutes remain
-        return datetime.now(timezone.utc) >= (expires_at - timedelta(minutes=5))
-    
-    @staticmethod
-    async def refresh_if_needed(encrypted: str, oauth: FyersOAuth2) -> tuple[str, bool]:
-        """Refresh token if expired. Returns (new_encrypted_data, was_refreshed)."""
-        tokens = FyersTokenStore.load_tokens(encrypted)
-        
-        if not FyersTokenStore.is_token_expired(encrypted):
-            return encrypted, False  # Still valid
-        
-        # Token expired; refresh it
-        new_tokens = await oauth.refresh_access_token(tokens["refresh_token"])
-        new_encrypted = FyersTokenStore.store_tokens(
-            access_token=new_tokens["access_token"],
-            refresh_token=new_tokens["refresh_token"],
-            expires_in=new_tokens["expires_in"],
-            client_id=tokens["client_id"],
-        )
-        return new_encrypted, True

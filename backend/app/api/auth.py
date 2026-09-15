@@ -1,15 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+import secrets
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, log_audit
+from app.core.security import hash_token
 from app.core.limiter import limiter
 from app.database import get_db
-from app.models import User
+from app.models import BrokerConnection, BrokerType, FyersOAuthState, User
+from app.brokers.fyers_oauth import FyersOAuth2, FyersOAuthError, FyersTokenStore
 from app.schemas.auth import (
     BrokerConnectRequest,
     BrokerConnectionResponse,
+    FyersCallbackRequest,
+    FyersConnectionStatus,
+    FyersLoginResponse,
     ForgotPasswordRequest,
     LoginRequest,
     MFAVerifyRequest,
@@ -265,6 +273,112 @@ async def mfa_enable(
 
 
 brokers_router = APIRouter(prefix="/brokers", tags=["Brokers"])
+
+
+@brokers_router.get("/fyers/login", response_model=FyersLoginResponse)
+async def fyers_login(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    oauth = FyersOAuth2()
+    try:
+        raw_state = secrets.token_urlsafe(32)
+        state = FyersOAuthState(
+            user_id=current_user.id,
+            state_hash=hash_token(raw_state),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=settings.fyers_oauth_state_ttl_seconds),
+        )
+        db.add(state)
+        await log_audit(db, "broker.oauth.started.fyers", current_user.id, request)
+        await db.flush()
+        return FyersLoginResponse(
+            authorization_url=oauth.get_auth_url(raw_state),
+            expires_in=settings.fyers_oauth_state_ttl_seconds,
+        )
+    except FyersOAuthError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@brokers_router.post("/fyers/callback", response_model=BrokerConnectionResponse)
+async def fyers_callback(
+    data: FyersCallbackRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(FyersOAuthState)
+        .where(FyersOAuthState.state_hash == hash_token(data.state), FyersOAuthState.user_id == current_user.id)
+        .with_for_update()
+    )
+    oauth_state = result.scalar_one_or_none()
+    expires_at = oauth_state.expires_at.replace(tzinfo=timezone.utc) if oauth_state and oauth_state.expires_at.tzinfo is None else (oauth_state.expires_at if oauth_state else None)
+    if not oauth_state or oauth_state.used_at or not expires_at or expires_at <= now:
+        raise HTTPException(status_code=400, detail="Invalid or expired FYERS authorization state")
+    oauth_state.used_at = now
+    oauth = FyersOAuth2()
+    try:
+        tokens = await oauth.exchange_code_for_token(data.auth_code)
+    except FyersOAuthError as exc:
+        await log_audit(db, "broker.oauth.failed.fyers", current_user.id, request, {"reason": "upstream_rejected"})
+        raise HTTPException(status_code=502, detail="FYERS authorization failed") from exc
+
+    encrypted = FyersTokenStore.store_tokens(tokens["access_token"], tokens["expires_in"], tokens["client_id"])
+    existing = await db.execute(select(BrokerConnection).where(
+        BrokerConnection.user_id == current_user.id, BrokerConnection.broker == BrokerType.FYERS
+    ))
+    conn = existing.scalar_one_or_none()
+    if conn:
+        conn.encrypted_credentials = encrypted
+        conn.client_id = tokens["client_id"]
+        conn.is_active = True
+        conn.health_status = "connected"
+        conn.last_health_check = now
+    else:
+        conn = BrokerConnection(
+            user_id=current_user.id, broker=BrokerType.FYERS, encrypted_credentials=encrypted,
+            client_id=tokens["client_id"], is_active=True, health_status="connected", last_health_check=now,
+        )
+        db.add(conn)
+    await log_audit(db, "broker.connected.fyers", current_user.id, request, {"oauth": "v3"})
+    await db.flush()
+    return conn
+
+
+@brokers_router.get("/fyers/status", response_model=FyersConnectionStatus)
+async def fyers_status(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(BrokerConnection).where(
+        BrokerConnection.user_id == current_user.id, BrokerConnection.broker == BrokerType.FYERS,
+        BrokerConnection.is_active.is_(True),
+    ))
+    conn = result.scalar_one_or_none()
+    if not conn:
+        return FyersConnectionStatus(broker="fyers", status="disconnected", health_status="not_connected")
+    return FyersConnectionStatus(
+        broker="fyers", status="connected" if conn.health_status == "connected" else "error",
+        client_id=conn.client_id, health_status=conn.health_status, last_health_check=conn.last_health_check,
+    )
+
+
+@brokers_router.delete("/fyers/connection", response_model=MessageResponse)
+async def disconnect_fyers(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(BrokerConnection).where(
+        BrokerConnection.user_id == current_user.id, BrokerConnection.broker == BrokerType.FYERS
+    ))
+    conn = result.scalar_one_or_none()
+    if conn:
+        await db.delete(conn)
+        await log_audit(db, "broker.disconnected.fyers", current_user.id, request)
+    return MessageResponse(message="FYERS connection disconnected")
 
 
 @brokers_router.post("/connect", response_model=BrokerConnectionResponse)

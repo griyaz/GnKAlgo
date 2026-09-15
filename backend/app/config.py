@@ -90,7 +90,10 @@ class Settings(BaseSettings):
 
     # FYERS API v3 (primary). Backend-only — never expose via NEXT_PUBLIC_*.
     fyers_client_id: str = ""
+    fyers_secret_key: str = ""
+    fyers_redirect_url: str = "https://gnkalgo.com/fyers/callback"
     fyers_access_token: str = ""
+    fyers_oauth_state_ttl_seconds: int = 600
 
     # Dhan market feed (optional fallback). Separate from Dhan execution/orders.
     dhan_market_data_enabled: bool = False

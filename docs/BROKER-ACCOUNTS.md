@@ -61,3 +61,12 @@ It backs up `.env`, sets `MARKET_DATA_PROVIDER=fyers` + `FYERS_ACCESS_TOKEN` (an
 `upstox-python-sdk` is now bundled in `backend/requirements.txt`, so
 `MARKET_DATA_PROVIDER=upstox` (with `UPSTOX_MARKET_DATA_ENABLED=true`,
 `UPSTOX_ACCESS_TOKEN=...`) works out of the box. The provider imports the SDK lazily.
+## FYERS OAuth (API v3)
+
+Set `FYERS_CLIENT_ID`, `FYERS_SECRET_KEY`, and
+`FYERS_REDIRECT_URL=https://gnkalgo.com/fyers/callback` in the backend environment.
+`FYERS_ACCESS_TOKEN` remains an optional backend-only market-data fallback; user
+connections are stored encrypted in `broker_connections` after the server-side
+FYERS v3 `validate-authcode` exchange. Never place the secret or token in
+`NEXT_PUBLIC_*`, browser code, logs, or API responses. Apply the
+`d6e7f8a9b0c1_add_fyers_oauth_states` migration before enabling OAuth.
