@@ -98,9 +98,11 @@ async def run(
         row = BacktestTrade(run_id=run_row.id, **trade)
         db.add(row)
         trade_rows.append(row)
-    if strategy and result["trade_count"] >= 0:
-        # A reproducible completed run is the paper validation required by the
-        # live lifecycle gate. Live order guards still apply independently.
+    # Only a run that actually produced a trade (or an SMC setup that filled)
+    # satisfies the PAPER → LIVE gate. trade_count >= 0 is always true and
+    # previously let a 2-candle dummy backtest promote unvalidated SMC rules.
+    verified = result["trade_count"] > 0 or int(result.get("metrics", {}).get("signal_count") or 0) > 0
+    if strategy and verified:
         from datetime import datetime, timezone
 
         strategy.paper_verified_at = datetime.now(timezone.utc)

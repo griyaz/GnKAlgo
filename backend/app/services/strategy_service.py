@@ -116,6 +116,10 @@ def parse_rules(rules_json: str) -> ParsedRules:
     return StrategyRules(action=action, qty=qty)
 
 
+def _canonical_rules(rules_json: str) -> dict:
+    return parse_rules(rules_json).model_dump()
+
+
 def _aware(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
@@ -180,6 +184,9 @@ class StrategyService:
         if not strategy:
             raise ValueError("Strategy not found")
 
+        previous_symbol = strategy.symbol
+        previous_rules = strategy.rules_json
+
         if data.name is not None:
             strategy.name = data.name
         if data.description is not None:
@@ -197,7 +204,8 @@ class StrategyService:
         if data.max_daily_loss is not None:
             strategy.max_daily_loss = data.max_daily_loss
 
-        rules_changed = any(
+        incoming_rules = None
+        if any(
             v is not None
             for v in (
                 data.rules_json,
@@ -209,9 +217,18 @@ class StrategyService:
                 data.stop_loss_buffer_pct,
                 data.target_rr,
             )
+        ):
+            incoming_rules = build_rules_json(data, previous_rules)
+
+        symbol_changed = data.symbol is not None and strategy.symbol != previous_symbol
+        rules_changed = (
+            incoming_rules is not None
+            and _canonical_rules(incoming_rules) != _canonical_rules(previous_rules)
         )
-        if rules_changed:
-            strategy.rules_json = build_rules_json(data, strategy.rules_json)
+        spec_changed = symbol_changed or rules_changed
+        if spec_changed:
+            if rules_changed:
+                strategy.rules_json = incoming_rules
             strategy.current_version = (strategy.current_version or 0) + 1
             db.add(
                 StrategyVersion(
@@ -219,10 +236,14 @@ class StrategyService:
                     version=strategy.current_version,
                     rules_json=strategy.rules_json,
                     status="DRAFT",
-                    changelog="Rules updated",
+                    changelog="Symbol/rules updated" if symbol_changed else "Rules updated",
                     created_by=user.id,
                 )
             )
+            # LIVE was gated on a prior validation of the previous instrument/rules.
+            strategy.paper_verified_at = None
+            if strategy.status == "LIVE" and data.status is None:
+                strategy.status = "PAPER" if strategy.paper_mode else "PAUSED"
 
         schedule_was_off = not strategy.schedule_enabled
         if data.schedule_enabled is not None:
@@ -343,7 +364,7 @@ class StrategyService:
             raise ValueError(blocked)
         if await self._daily_loss(db, strategy) >= strategy.max_daily_loss:
             raise ValueError(f"Max daily loss {strategy.max_daily_loss} reached")
-        return await order_service.place_order(
+        order = await order_service.place_order(
             db,
             user,
             PlaceOrderRequest(
@@ -358,6 +379,9 @@ class StrategyService:
             strategy_id=strategy.id,
             max_quantity=strategy.max_quantity,
         )
+        if strategy.paper_mode and is_successful_placement(order.status):
+            strategy.paper_verified_at = datetime.now(timezone.utc)
+        return order
 
     async def _candle_adapter(self, db: AsyncSession, user: User):
         """Prefer a broker that can actually return OHLC (Dhan, then Upstox)."""

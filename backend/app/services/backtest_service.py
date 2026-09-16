@@ -10,11 +10,37 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
+from app.services.strategy_evaluators.smc_intraday import evaluate_smc_intraday
+
 
 def _time(value) -> datetime:
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     return datetime.fromtimestamp(int(value), tz=timezone.utc)
+
+
+def _smc_entry(rules: dict, completed: list[dict]) -> dict | None:
+    """Return a no-lookahead SMC entry, or None when the completed bars have no setup."""
+    action = rules.get("action", "AUTO")
+    side_mode = action if action in ("BUY", "SELL", "AUTO") else "AUTO"
+    signal = evaluate_smc_intraday(
+        completed,
+        entry_mode=rules.get("entry", "fvg"),
+        side_mode=side_mode,
+        buffer_pct=float(rules.get("stop_loss_buffer_pct", 0.1)),
+        target_rr=float(rules.get("target_rr", 2.0)),
+        swing_lookback=int(rules.get("swing_lookback", 5)),
+    )
+    if not signal.should_trade or not signal.side or signal.entry is None:
+        return None
+    if signal.stop_loss is None or signal.target is None:
+        return None
+    return {
+        "side": signal.side,
+        "entry": float(signal.entry),
+        "stop_offset": float(signal.stop_loss) - float(signal.entry),
+        "target_offset": float(signal.target) - float(signal.entry),
+    }
 
 
 def run_backtest(
@@ -42,12 +68,13 @@ def run_backtest(
         previous_time = item["time"]
         normalized.append(item)
 
+    is_smc = rules.get("type") == "smc_intraday"
     action = rules.get("action", "BUY")
     if action not in ("BUY", "SELL"):
         action = "BUY"
     stop_pct = float(rules.get("stop_loss_pct", rules.get("stop_loss_buffer_pct", 1.0))) / 100
     target_pct = float(rules.get("target_pct", 2.0)) / 100
-    if stop_pct <= 0 or target_pct <= 0:
+    if not is_smc and (stop_pct <= 0 or target_pct <= 0):
         raise ValueError("stop_loss_pct and target_pct must be positive")
 
     cash = float(initial_capital)
@@ -57,6 +84,7 @@ def run_backtest(
     trades = []
     equity_curve = [cash]
     friction = (commission_bps + slippage_bps) / 10000
+    signal_count = 0
 
     def fill_price(price: float, side: str) -> float:
         return price * (1 + friction if side == "BUY" else 1 - friction)
@@ -83,10 +111,34 @@ def run_backtest(
         )
         position = None
 
-    # i only reads normalized[i - 1] for the decision and normalized[i] for fill.
+    # Decision uses only completed bars (normalized[:i]); fill is the next open.
     for i in range(1, len(normalized)):
         candle = normalized[i]
         if position is None:
+            if is_smc:
+                smc = _smc_entry(rules, normalized[:i])
+                if smc is None:
+                    equity_curve.append(cash)
+                    continue
+                signal_count += 1
+                entry_side = smc["side"]
+                entry = fill_price(candle["open"], entry_side)
+                stop = entry + smc["stop_offset"]
+                target = entry + smc["target_offset"]
+                if entry_side == "BUY" and (entry <= stop or target <= entry):
+                    equity_curve.append(cash)
+                    continue
+                if entry_side == "SELL" and (entry >= stop or target >= entry):
+                    equity_curve.append(cash)
+                    continue
+                position = {
+                    "side": entry_side,
+                    "price": entry,
+                    "time": candle["time"],
+                    "stop": stop,
+                    "target": target,
+                }
+                continue
             entry_side = "BUY" if action == "BUY" else "SELL"
             entry = fill_price(candle["open"], entry_side)
             position = {"side": entry_side, "price": entry, "time": candle["time"]}
@@ -126,6 +178,7 @@ def run_backtest(
             "win_rate": round(wins / len(trades), 6) if trades else 0.0,
             "profitable_trades": wins,
             "losses": len(trades) - wins,
+            "signal_count": signal_count,
             "equity_curve": [round(value, 8) for value in equity_curve],
         },
         "trades": trades,
