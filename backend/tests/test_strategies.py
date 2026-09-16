@@ -635,3 +635,110 @@ def test_smc_run_fetches_candles_through_dhan_adapter():
             assert run.json()["status"] == "SKIPPED"
     finally:
         candle_service.get_candles = original  # type: ignore[method-assign]
+
+
+def test_smc_dummy_backtest_does_not_unlock_live():
+    """A 2-candle always-enter backtest used to stamp paper_verified_at for SMC."""
+    with TestClient(app) as client:
+        access = _register_login(client, f"gate-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "SMC live gate",
+                "symbol": "RELIANCE",
+                "strategy_type": "smc_intraday",
+                "timeframe": "15m",
+                "entry_mode": "fvg",
+                "action": "AUTO",
+                "qty": 1,
+                "paper_mode": True,
+            },
+        )
+        assert created.status_code == 200
+        strategy_id = created.json()["id"]
+        assert created.json()["paper_verified_at"] is None
+
+        backtest = client.post(
+            "/api/v1/backtests/run",
+            headers=auth,
+            json={
+                "strategy_id": strategy_id,
+                "candles": [
+                    {"time": 1, "open": 100, "high": 101, "low": 99, "close": 100},
+                    {"time": 2, "open": 100, "high": 101, "low": 99, "close": 100},
+                ],
+                "initial_capital": 100000,
+            },
+        )
+        assert backtest.status_code == 200
+        assert backtest.json()["trade_count"] == 0
+
+        listed = client.get("/api/v1/strategies/", headers=auth)
+        assert listed.status_code == 200
+        row = next(item for item in listed.json() if item["id"] == strategy_id)
+        assert row["paper_verified_at"] is None
+
+        paper = client.post(
+            f"/api/v1/strategies/{strategy_id}/status?status=PAPER",
+            headers=auth,
+        )
+        assert paper.status_code == 200
+
+        live = client.post(
+            f"/api/v1/strategies/{strategy_id}/status?status=LIVE",
+            headers=auth,
+        )
+        assert live.status_code == 400
+        assert "paper/backtest" in live.json()["detail"]
+
+
+def test_paper_run_unlocks_live_and_symbol_change_revokes_it():
+    with TestClient(app) as client:
+        access = _register_login(client, f"paper-gate-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Simple paper",
+                "symbol": "TCS",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+            },
+        )
+        assert created.status_code == 200
+        strategy_id = created.json()["id"]
+
+        run = client.post(f"/api/v1/strategies/{strategy_id}/run", headers=auth)
+        assert run.status_code == 200
+        assert run.json()["status"] == "COMPLETED"
+
+        listed = client.get("/api/v1/strategies/", headers=auth)
+        row = next(item for item in listed.json() if item["id"] == strategy_id)
+        assert row["paper_verified_at"] is not None
+
+        paper = client.post(
+            f"/api/v1/strategies/{strategy_id}/status?status=PAPER",
+            headers=auth,
+        )
+        assert paper.status_code == 200
+
+        live = client.post(
+            f"/api/v1/strategies/{strategy_id}/status?status=LIVE",
+            headers=auth,
+        )
+        assert live.status_code == 200
+        assert live.json()["status"] == "LIVE"
+
+        updated = client.put(
+            f"/api/v1/strategies/{strategy_id}",
+            headers=auth,
+            json={"symbol": "INFY"},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["symbol"] == "INFY"
+        assert updated.json()["paper_verified_at"] is None
+        assert updated.json()["status"] == "PAPER"
