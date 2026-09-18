@@ -635,3 +635,146 @@ def test_smc_run_fetches_candles_through_dhan_adapter():
             assert run.json()["status"] == "SKIPPED"
     finally:
         candle_service.get_candles = original  # type: ignore[method-assign]
+
+
+def _bullish_fvg_candles():
+    base = 100.0
+    candles = []
+    for i in range(12):
+        candles.append(
+            {
+                "time": i,
+                "open": base,
+                "high": base + 1,
+                "low": base - 1,
+                "close": base + 0.5,
+            }
+        )
+        base += 0.2
+    candles[-3]["high"] = 102.0
+    candles[-2]["low"] = 101.5
+    candles[-1]["low"] = 103.0
+    candles[-1]["close"] = 103.5
+    candles[-1]["high"] = 104.0
+    return candles
+
+
+def test_smc_attaches_stop_loss_instead_of_naked_market():
+    """Live SMC used to place a MARKET INTRADAY entry and throw away the SL."""
+    from app.services.candle_service import candle_service
+    from app.services.order_service import order_service
+    from app.services.strategy_evaluators.smc_intraday import evaluate_smc_intraday
+    from app.services.strategy_service import strategy_service
+
+    candles = _bullish_fvg_candles()
+    expected_sl = evaluate_smc_intraday(candles, entry_mode="fvg", side_mode="AUTO").stop_loss
+    captured = {}
+
+    async def fake_get_candles(db, symbol, exchange, interval, adapter=None, count=500):
+        return {"candles": candles, "source": "test"}
+
+    async def fake_place(db, user, data, **kwargs):
+        captured["data"] = data
+        class Order:
+            id = uuid.uuid4()
+            status = "PAPER_FILLED"
+        return Order()
+
+    original_candles = candle_service.get_candles
+    original_place = order_service.place_order
+    candle_service.get_candles = fake_get_candles  # type: ignore[method-assign]
+    order_service.place_order = fake_place  # type: ignore[method-assign]
+    try:
+        with TestClient(app) as client:
+            email = f"smcsl-{uuid.uuid4().hex[:8]}@gnkalgo.com"
+            access = _register_login(client, email)
+            auth = {"Authorization": f"Bearer {access}"}
+            created = client.post(
+                "/api/v1/strategies/",
+                headers=auth,
+                json={
+                    "name": "SMC with SL",
+                    "symbol": "RELIANCE",
+                    "strategy_type": "smc_intraday",
+                    "timeframe": "15m",
+                    "action": "AUTO",
+                    "qty": 1,
+                    "paper_mode": True,
+                },
+            )
+            assert created.status_code == 200
+            run = client.post(f"/api/v1/strategies/{created.json()['id']}/run", headers=auth)
+            assert run.status_code == 200
+            assert run.json()["status"] == "COMPLETED"
+            assert captured["data"].trigger_price == expected_sl
+            assert captured["data"].product_type == "INTRADAY"
+    finally:
+        candle_service.get_candles = original_candles  # type: ignore[method-assign]
+        order_service.place_order = original_place  # type: ignore[method-assign]
+
+
+def test_smc_live_uses_dhan_cover_order_for_compulsory_stop():
+    from types import SimpleNamespace
+
+    from app.services.candle_service import candle_service
+    from app.services.strategy_service import strategy_service
+
+    candles = _bullish_fvg_candles()
+    captured = {}
+
+    async def fake_get_candles(db, symbol, exchange, interval, adapter=None, count=500):
+        return {"candles": candles, "source": "test"}
+
+    async def fake_place(db, user, strategy, side, qty, scheduled, trigger_price=None, product_type="INTRADAY"):
+        captured["trigger_price"] = trigger_price
+        captured["product_type"] = product_type
+        captured["side"] = side
+        class Order:
+            id = uuid.uuid4()
+            status = "PENDING"
+        return Order()
+
+    async def fake_adapter(db, user):
+        return None
+
+    original_candles = candle_service.get_candles
+    original_place = strategy_service._place_strategy_order
+    original_adapter = strategy_service._candle_adapter
+    candle_service.get_candles = fake_get_candles  # type: ignore[method-assign]
+    strategy_service._place_strategy_order = fake_place  # type: ignore[method-assign]
+    strategy_service._candle_adapter = fake_adapter  # type: ignore[method-assign]
+    try:
+        import asyncio
+
+        strategy = SimpleNamespace(
+            id=uuid.uuid4(),
+            symbol="RELIANCE",
+            paper_mode=False,
+            max_quantity=10,
+        )
+        rules = SimpleNamespace(
+            timeframe="15m",
+            entry="fvg",
+            action="AUTO",
+            qty=1,
+            stop_loss_buffer_pct=0.1,
+            target_rr=2.0,
+            swing_lookback=5,
+        )
+        run = SimpleNamespace(status="RUNNING", notes=None)
+        user = SimpleNamespace(id=uuid.uuid4())
+
+        async def go():
+            return await strategy_service._run_smc_intraday(
+                None, user, strategy, rules, run, scheduled=False
+            )
+
+        result = asyncio.run(go())
+        assert result.status == "COMPLETED"
+        assert captured["product_type"] == "CO"
+        assert captured["trigger_price"] is not None
+        assert captured["side"] == "BUY"
+    finally:
+        candle_service.get_candles = original_candles  # type: ignore[method-assign]
+        strategy_service._place_strategy_order = original_place  # type: ignore[method-assign]
+        strategy_service._candle_adapter = original_adapter  # type: ignore[method-assign]

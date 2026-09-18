@@ -4,7 +4,15 @@ from app.brokers.base import BrokerAdapter, OrderRequest, OrderResponse
 from app.config import settings
 
 # FYERS API v3 order-type / side / product wire values.
-_ORDER_TYPE = {"MARKET": 2, "LIMIT": 1, "SL": 3, "SL-M": 4, "SLM": 4}
+_ORDER_TYPE = {
+    "MARKET": 2,
+    "LIMIT": 1,
+    "SL": 3,
+    "SL-M": 4,
+    "SLM": 4,
+    "STOP_LOSS": 3,
+    "STOP_LOSS_MARKET": 4,
+}
 _SIDE = {"BUY": 1, "SELL": -1}
 
 
@@ -71,7 +79,10 @@ class FyersExecutionAdapter(BrokerAdapter):
             product = "INTRADAY"
         elif product in ("CNC", "DELIVERY"):
             product = "CNC"
-        order_type = _ORDER_TYPE.get(order.order_type.upper(), 2)
+        raw_type = order.order_type.upper()
+        if order.trigger_price and raw_type in {"MARKET", "LIMIT"}:
+            raw_type = "STOP_LOSS_MARKET" if raw_type == "MARKET" else "STOP_LOSS"
+        order_type = _ORDER_TYPE.get(raw_type, 2)
         return {
             "symbol": order.security_id or order.symbol,
             "qty": order.quantity,
@@ -79,7 +90,7 @@ class FyersExecutionAdapter(BrokerAdapter):
             "side": _SIDE.get(order.side.upper(), 1),
             "productType": product,
             "limitPrice": order.price or 0,
-            "stopPrice": 0,
+            "stopPrice": order.trigger_price or 0,
             "validity": "DAY",
             "disclosedQty": 0,
             "offlineOrder": False,

@@ -41,6 +41,7 @@ export function QuickOrderPanel({
     setLoading(true);
     setError("");
     try {
+      const trigger = triggerPrice.trim() ? Number(triggerPrice) : null;
       await api("/api/v1/orders/", {
         method: "POST",
         body: JSON.stringify({
@@ -51,6 +52,7 @@ export function QuickOrderPanel({
           order_type: orderType,
           product_type: productType,
           price: price ? Number(price) : null,
+          trigger_price: trigger && trigger > 0 ? trigger : null,
           paper_mode: paperMode,
           broker: paperMode ? "paper" : "dhan",
           live_confirmation: paperMode ? null : liveConfirmation,
@@ -65,7 +67,9 @@ export function QuickOrderPanel({
     }
   }
 
-  const estLabel = `${side} ${quantity} × ${symbol} · ${orderType} · ${productType}${paperMode ? " · Paper" : " · Live"}`;
+  const estLabel = `${side} ${quantity} × ${symbol} · ${
+    triggerPrice ? `stop ${orderType} @ ${triggerPrice}` : orderType
+  } · ${productType}${paperMode ? " · Paper" : " · Live"}`;
 
   return (
     <div className="rounded border border-[var(--line)] bg-[var(--panel)] p-3">

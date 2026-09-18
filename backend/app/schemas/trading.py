@@ -27,8 +27,9 @@ class PlaceOrderRequest(BaseModel):
     exchange: str = "NSE"
     side: Literal["BUY", "SELL"]
     quantity: int = Field(gt=0, le=10000)
-    order_type: Literal["MARKET", "LIMIT"] = "MARKET"
+    order_type: Literal["MARKET", "LIMIT", "STOP_LOSS", "STOP_LOSS_MARKET"] = "MARKET"
     price: float | None = None
+    trigger_price: float | None = Field(default=None, gt=0)
     product_type: str = "INTRADAY"
     broker: Literal["dhan", "groww", "fyers", "upstox", "paper"] = "paper"
     paper_mode: bool = True

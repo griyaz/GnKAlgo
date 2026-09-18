@@ -89,18 +89,27 @@ class DhanAdapter(BrokerAdapter):
             product = "INTRADAY"
         elif product in ("CNC", "DELIVERY"):
             product = "CNC"
-        return {
+        order_type = (order.order_type or "MARKET").upper()
+        # A trigger on a regular INTRADAY/CNC ticket is a stop-loss *entry*
+        # (SL / SL-M). Cover/bracket orders keep MARKET/LIMIT and attach the
+        # trigger as the compulsory protective stop instead.
+        if order.trigger_price and product not in {"CO", "BO"} and order_type in {"MARKET", "LIMIT"}:
+            order_type = "STOP_LOSS_MARKET" if order_type == "MARKET" else "STOP_LOSS"
+        payload = {
             "dhanClientId": None,
             "transactionType": order.side,
             "exchangeSegment": order.exchange_segment or "NSE_EQ",
             "productType": product,
-            "orderType": order.order_type,
+            "orderType": order_type,
             "validity": "DAY",
             "securityId": str(order.security_id or ""),
             "quantity": order.quantity,
             "price": order.price or 0,
             "correlationId": order.correlation_id,
         }
+        if order.trigger_price:
+            payload["triggerPrice"] = float(order.trigger_price)
+        return payload
 
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         if not order.security_id:
