@@ -31,6 +31,12 @@ def test_fyers_payload_market_buy_intraday():
     assert p["symbol"] == "NSE:SBIN-EQ"
 
 
+def test_fyers_payload_trigger_on_market_becomes_slm():
+    p = FyersExecutionAdapter.order_payload(_order(trigger_price=820.0))
+    assert p["type"] == 4  # SL-M
+    assert p["stopPrice"] == 820.0
+
+
 def test_fyers_payload_limit_sell_cnc():
     p = FyersExecutionAdapter.order_payload(
         _order(side="SELL", order_type="LIMIT", product_type="DELIVERY", price=101.5)
@@ -46,6 +52,13 @@ def test_upstox_payload_intraday_buy():
     assert p["product"] == "I"
     assert p["transaction_type"] == "BUY"
     assert p["instrument_token"] == "NSE_EQ|INE123"
+
+
+def test_upstox_payload_forwards_trigger_price():
+    p = UpstoxExecutionAdapter.order_payload(
+        _order(security_id="NSE_EQ|INE123", trigger_price=101.0)
+    )
+    assert p["trigger_price"] == 101.0
 
 
 def test_upstox_payload_delivery_maps_to_D():

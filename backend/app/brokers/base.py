@@ -9,12 +9,13 @@ class OrderRequest:
     exchange: str
     side: str  # BUY / SELL
     quantity: int
-    order_type: str  # MARKET / LIMIT
+    order_type: str  # MARKET / LIMIT / STOP_LOSS / STOP_LOSS_MARKET
     price: float | None = None
     product_type: str = "INTRADAY"
     correlation_id: str | None = None
     security_id: str | None = None
     exchange_segment: str | None = None
+    trigger_price: float | None = None
 
 
 @dataclass

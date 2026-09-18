@@ -60,6 +60,7 @@ class GrowwAdapter(BrokerAdapter):
             "order_type": order.order_type,
             "quantity": order.quantity,
             "price": order.price,
+            "trigger_price": order.trigger_price,
             "product": order.product_type,
             "validity": "DAY",
             "order_reference_id": order.correlation_id,

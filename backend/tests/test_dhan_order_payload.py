@@ -66,6 +66,28 @@ def test_dhan_intraday_candles_use_intraday_endpoint_and_interval():
     assert candles[0]["close"] == 101.0
 
 
+def test_dhan_payload_maps_trigger_on_market_to_stop_loss_market():
+    payload = _payload(trigger_price=2500.5)
+    assert payload["orderType"] == "STOP_LOSS_MARKET"
+    assert payload["triggerPrice"] == 2500.5
+    assert payload["productType"] == "INTRADAY"
+    assert payload["price"] == 0
+
+
+def test_dhan_payload_maps_trigger_on_limit_to_stop_loss():
+    payload = _payload(order_type="LIMIT", price=2499.0, trigger_price=2500.0)
+    assert payload["orderType"] == "STOP_LOSS"
+    assert payload["triggerPrice"] == 2500.0
+    assert payload["price"] == 2499.0
+
+
+def test_dhan_cover_order_keeps_market_type_and_attaches_trigger():
+    payload = _payload(product_type="CO", trigger_price=1418.0)
+    assert payload["productType"] == "CO"
+    assert payload["orderType"] == "MARKET"
+    assert payload["triggerPrice"] == 1418.0
+
+
 def test_dhan_daily_candles_keep_historical_endpoint():
     adapter = DhanAdapter(access_token="t", client_id="c")
     captured = {}

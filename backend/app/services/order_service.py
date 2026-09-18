@@ -190,6 +190,7 @@ class OrderService:
                     correlation_id=order.correlation_id,
                     security_id=str(inst["security_id"]),
                     exchange_segment=exchange_segment,
+                    trigger_price=data.trigger_price,
                 )
             )
             order.broker_order_id = response.broker_order_id

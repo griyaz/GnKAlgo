@@ -73,7 +73,7 @@ class UpstoxExecutionAdapter(BrokerAdapter):
             "order_type": order.order_type.upper(),
             "transaction_type": order.side.upper(),
             "disclosed_quantity": 0,
-            "trigger_price": 0,
+            "trigger_price": order.trigger_price or 0,
             "is_amo": False,
         }
 

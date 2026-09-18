@@ -335,6 +335,8 @@ class StrategyService:
         side: Literal["BUY", "SELL"],
         qty: int,
         scheduled: bool,
+        trigger_price: float | None = None,
+        product_type: str = "INTRADAY",
     ):
         if not strategy.paper_mode and strategy.status != "LIVE":
             raise ValueError("Strategy must be LIVE before placing live orders")
@@ -352,7 +354,8 @@ class StrategyService:
                 quantity=qty,
                 paper_mode=strategy.paper_mode,
                 broker="paper" if strategy.paper_mode else "dhan",
-                product_type="INTRADAY",
+                product_type=product_type,
+                trigger_price=trigger_price,
             ),
             source="strategy_scheduler" if scheduled else "strategy",
             strategy_id=strategy.id,
@@ -423,7 +426,19 @@ class StrategyService:
 
         qty = min(rules.qty, strategy.max_quantity)
         try:
-            order = await self._place_strategy_order(db, user, strategy, signal.side, qty, scheduled)
+            # Live SMC must not enter naked: Dhan Cover Order attaches the
+            # computed stop as a compulsory SL on the same ticket. Paper
+            # fills never hit the broker, so they stay INTRADAY.
+            order = await self._place_strategy_order(
+                db,
+                user,
+                strategy,
+                signal.side,
+                qty,
+                scheduled,
+                trigger_price=signal.stop_loss,
+                product_type="INTRADAY" if strategy.paper_mode else "CO",
+            )
         except ValueError as exc:
             run.status = "FAILED"
             run.notes = str(exc)
