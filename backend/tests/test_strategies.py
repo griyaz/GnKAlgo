@@ -635,3 +635,105 @@ def test_smc_run_fetches_candles_through_dhan_adapter():
             assert run.json()["status"] == "SKIPPED"
     finally:
         candle_service.get_candles = original  # type: ignore[method-assign]
+
+
+def test_live_strategy_rule_change_revokes_verification_and_pauses_schedule():
+    """Editing a LIVE strategy used to keep paper_verified_at and keep firing."""
+    from sqlalchemy import select
+
+    from app.database import AsyncSessionLocal
+    from app.models import Order, Strategy
+    from app.services.strategy_service import strategy_service
+
+    with TestClient(app) as client:
+        access = _register_login(client, f"livemut-{uuid.uuid4().hex[:8]}@gnkalgo.com")
+        auth = {"Authorization": f"Bearer {access}"}
+        created = client.post(
+            "/api/v1/strategies/",
+            headers=auth,
+            json={
+                "name": "Verified live SMC",
+                "symbol": "RELIANCE",
+                "strategy_type": "smc_intraday",
+                "action": "BUY",
+                "qty": 1,
+                "paper_mode": True,
+                "schedule_enabled": True,
+                "interval_minutes": 1,
+                "max_quantity": 10,
+            },
+        )
+        assert created.status_code == 200
+        strategy_id = uuid.UUID(created.json()["id"])
+        verified_at = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        stale = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+        async def make_live_verified():
+            async with AsyncSessionLocal() as session:
+                row = (await session.execute(select(Strategy).where(Strategy.id == strategy_id))).scalar_one()
+                row.status = "LIVE"
+                row.paper_verified_at = verified_at
+                row.last_scheduled_run_at = stale
+                await session.commit()
+
+        import asyncio
+
+        asyncio.run(make_live_verified())
+
+        paused_only = client.put(
+            f"/api/v1/strategies/{strategy_id}",
+            headers=auth,
+            json={"status": "PAUSED"},
+        )
+        assert paused_only.status_code == 200
+        assert paused_only.json()["status"] == "PAUSED"
+        assert paused_only.json()["paper_verified_at"] is not None
+
+        resumed = client.put(
+            f"/api/v1/strategies/{strategy_id}",
+            headers=auth,
+            json={"status": "LIVE"},
+        )
+        assert resumed.status_code == 200
+        assert resumed.json()["status"] == "LIVE"
+        assert resumed.json()["paper_verified_at"] is not None
+
+        mutated = client.put(
+            f"/api/v1/strategies/{strategy_id}",
+            headers=auth,
+            json={"symbol": "YESBANK", "qty": 50, "max_quantity": 50},
+        )
+        assert mutated.status_code == 200
+        body = mutated.json()
+        assert body["symbol"] == "YESBANK"
+        assert body["status"] == "PAUSED"
+        assert body["paper_verified_at"] is None
+
+        redeploy = client.put(
+            f"/api/v1/strategies/{strategy_id}",
+            headers=auth,
+            json={"status": "LIVE"},
+        )
+        assert redeploy.status_code == 400
+        assert "paper/backtest" in redeploy.json()["detail"]
+
+        async def run_scheduler():
+            async with AsyncSessionLocal() as session:
+                ran = await strategy_service.run_due_scheduled(session)
+                await session.commit()
+                return ran
+
+        asyncio.run(run_scheduler())
+
+        async def load_state():
+            async with AsyncSessionLocal() as session:
+                row = (await session.execute(select(Strategy).where(Strategy.id == strategy_id))).scalar_one()
+                orders = list(
+                    (await session.execute(select(Order).where(Order.strategy_id == strategy_id))).scalars()
+                )
+                return row.status, row.paper_verified_at, orders
+
+        status, verified, orders = asyncio.run(load_state())
+        assert status == "PAUSED"
+        assert verified is None
+        assert orders == []

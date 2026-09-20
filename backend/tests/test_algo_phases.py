@@ -46,6 +46,30 @@ def test_live_lifecycle_requires_paper_validation():
         raise AssertionError("live transition must require paper validation")
 
 
+def test_material_strategy_edit_clears_verification_and_pauses_live():
+    verified = datetime.now(timezone.utc)
+    strategy = SimpleNamespace(status="LIVE", paper_verified_at=verified)
+    StrategyService._invalidate_paper_verification(
+        strategy, symbol_changed=True, rules_changed=False, max_quantity_changed=False
+    )
+    assert strategy.paper_verified_at is None
+    assert strategy.status == "PAUSED"
+
+    paper = SimpleNamespace(status="PAPER", paper_verified_at=verified)
+    StrategyService._invalidate_paper_verification(
+        paper, symbol_changed=False, rules_changed=True, max_quantity_changed=False
+    )
+    assert paper.paper_verified_at is None
+    assert paper.status == "PAPER"
+
+    untouched = SimpleNamespace(status="LIVE", paper_verified_at=verified)
+    StrategyService._invalidate_paper_verification(
+        untouched, symbol_changed=False, rules_changed=False, max_quantity_changed=False
+    )
+    assert untouched.paper_verified_at is verified
+    assert untouched.status == "LIVE"
+
+
 def _scheduled(status: str, paper_mode: bool, last=None):
     return SimpleNamespace(
         schedule_enabled=True,

@@ -184,20 +184,25 @@ class StrategyService:
             strategy.name = data.name
         if data.description is not None:
             strategy.description = data.description
+        symbol_changed = False
         if data.symbol is not None:
-            strategy.symbol = data.symbol.upper()
+            new_symbol = data.symbol.upper()
+            symbol_changed = new_symbol != (strategy.symbol or "").upper()
+            strategy.symbol = new_symbol
         if data.paper_mode is not None:
             strategy.paper_mode = data.paper_mode
             if not strategy.paper_mode:
                 sub = await billing_service.active_subscription(db, user)
                 if not sub:
                     raise ValueError("Active subscription required for live strategies")
+        max_quantity_changed = False
         if data.max_quantity is not None:
+            max_quantity_changed = data.max_quantity != strategy.max_quantity
             strategy.max_quantity = data.max_quantity
         if data.max_daily_loss is not None:
             strategy.max_daily_loss = data.max_daily_loss
 
-        rules_changed = any(
+        rules_fields_present = any(
             v is not None
             for v in (
                 data.rules_json,
@@ -210,19 +215,32 @@ class StrategyService:
                 data.target_rr,
             )
         )
-        if rules_changed:
-            strategy.rules_json = build_rules_json(data, strategy.rules_json)
-            strategy.current_version = (strategy.current_version or 0) + 1
-            db.add(
-                StrategyVersion(
-                    strategy_id=strategy.id,
-                    version=strategy.current_version,
-                    rules_json=strategy.rules_json,
-                    status="DRAFT",
-                    changelog="Rules updated",
-                    created_by=user.id,
+        rules_changed = False
+        if rules_fields_present:
+            new_rules = build_rules_json(data, strategy.rules_json)
+            if new_rules != strategy.rules_json:
+                strategy.rules_json = new_rules
+                strategy.current_version = (strategy.current_version or 0) + 1
+                db.add(
+                    StrategyVersion(
+                        strategy_id=strategy.id,
+                        version=strategy.current_version,
+                        rules_json=strategy.rules_json,
+                        status="DRAFT",
+                        changelog="Rules updated",
+                        created_by=user.id,
+                    )
                 )
-            )
+                rules_changed = True
+
+        # paper_verified_at is the LIVE gate. Mutating the traded instrument or
+        # rules after a backtest must not keep deploying the old validation.
+        self._invalidate_paper_verification(
+            strategy,
+            symbol_changed=symbol_changed,
+            rules_changed=rules_changed,
+            max_quantity_changed=max_quantity_changed,
+        )
 
         schedule_was_off = not strategy.schedule_enabled
         if data.schedule_enabled is not None:
@@ -266,6 +284,22 @@ class StrategyService:
                 raise ValueError(blocked)
         strategy.status = status
         return strategy
+
+    @staticmethod
+    def _invalidate_paper_verification(
+        strategy: Strategy,
+        *,
+        symbol_changed: bool,
+        rules_changed: bool,
+        max_quantity_changed: bool,
+    ) -> None:
+        if not (symbol_changed or rules_changed or max_quantity_changed):
+            return
+        strategy.paper_verified_at = None
+        if strategy.status == "LIVE":
+            # Stop scheduled live MARKET orders until the new configuration is
+            # paper/backtest validated and explicitly re-deployed.
+            strategy.status = "PAUSED"
 
     @staticmethod
     def _validate_transition(strategy: Strategy, target: str) -> None:
