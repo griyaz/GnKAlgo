@@ -27,7 +27,7 @@ export function ExitPositionModal({
         <p className="mt-1 text-xs text-white">Net Qty: {position.netQty}</p>
         <p className="text-xs text-white">Market Price: {fmtINR(position.ltp)}</p>
         <p className="mt-3 text-[11px] text-[var(--muted)]">
-          This will place a market order to close the position. Confirm only if you intend to exit.
+          This sends a live Dhan market order to close the position. Confirm only if you intend to exit.
         </p>
         <div className="mt-4 flex gap-2">
           <button type="button" onClick={onClose} className="flex-1 rounded border border-[var(--line)] py-2 text-xs">
