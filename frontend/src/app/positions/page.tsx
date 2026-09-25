@@ -13,7 +13,13 @@ import {
   TerminalInput,
 } from "@/components/ui/terminal";
 import { api } from "@/lib/api";
-import { normalizePosition, type NormalizedPosition } from "@/lib/portfolio";
+import type { LocalOrder } from "@/lib/orders";
+import {
+  buildExitOrderPayload,
+  isRejectedOrder,
+  normalizePosition,
+  type NormalizedPosition,
+} from "@/lib/portfolio";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const TABS = [
@@ -71,21 +77,13 @@ export default function PositionsPage() {
     setExitLoading(true);
     setError("");
     try {
-      const side = exitTarget.netQty > 0 ? "SELL" : "BUY";
-      const qty = Math.abs(exitTarget.netQty);
-      await api("/api/v1/orders/", {
+      const order = await api<LocalOrder>("/api/v1/orders/", {
         method: "POST",
-        body: JSON.stringify({
-          symbol: exitTarget.symbol,
-          exchange: "NSE",
-          side,
-          quantity: qty,
-          order_type: "MARKET",
-          product_type: exitTarget.product !== "—" ? exitTarget.product : "INTRADAY",
-          paper_mode: true,
-          broker: "paper",
-        }),
+        body: JSON.stringify(buildExitOrderPayload(exitTarget)),
       }, true);
+      if (isRejectedOrder(order.status)) {
+        throw new Error(order.message || "Live exit order was rejected");
+      }
       setExitTarget(null);
       await load();
     } catch (err) {

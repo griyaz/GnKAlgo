@@ -54,3 +54,35 @@ export function normalizePosition(raw: Record<string, unknown>, index: number): 
     raw,
   };
 }
+
+export const LIVE_ORDER_CONFIRMATION = "CONFIRM LIVE ORDER";
+
+/** Map Dhan exchangeSegment values (NSE_EQ, BSE_EQ, …) to PlaceOrderRequest.exchange. */
+export function exchangeFromSegment(segment: string | undefined): "NSE" | "BSE" {
+  const value = (segment || "NSE").toUpperCase();
+  if (value.startsWith("BSE")) return "BSE";
+  return "NSE";
+}
+
+export function isRejectedOrder(status: string | undefined): boolean {
+  return (status || "").toUpperCase().includes("REJECT");
+}
+
+/** Live Dhan MARKET ticket that actually closes a broker position. */
+export function buildExitOrderPayload(position: NormalizedPosition) {
+  const quantity = Math.abs(position.netQty);
+  if (quantity <= 0) {
+    throw new Error("Nothing to exit");
+  }
+  return {
+    symbol: position.symbol,
+    exchange: exchangeFromSegment(position.exchange),
+    side: position.netQty > 0 ? ("SELL" as const) : ("BUY" as const),
+    quantity,
+    order_type: "MARKET" as const,
+    product_type: position.product !== "—" ? position.product : "INTRADAY",
+    paper_mode: false,
+    broker: "dhan" as const,
+    live_confirmation: LIVE_ORDER_CONFIRMATION,
+  };
+}
