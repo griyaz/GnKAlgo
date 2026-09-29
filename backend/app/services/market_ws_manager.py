@@ -180,6 +180,12 @@ async def _ensure_user_feed(user_id: str, creds: dict) -> DhanMarketFeed | None:
 
 
 async def _subscribe_upstream(user_id: str, inst: dict, creds: dict | None) -> bool:
+  # Live ticks must be entitled per user. A global ref-count would let a
+  # client without Dhan credentials join an instrument another user already
+  # opened and receive that user's licensed feed.
+  if not creds and not _use_mock():
+    return False
+
   fk = inst["feed_key"]
   _instrument_meta[fk] = inst
   bind_symbol(inst["dhan_segment"], inst["security_id"], inst["symbol"])
@@ -191,8 +197,6 @@ async def _subscribe_upstream(user_id: str, inst: dict, creds: dict | None) -> b
         await feed.subscribe([(inst["dhan_segment"], inst["security_id"])])
       elif not _use_mock():
         return False
-    elif not _use_mock():
-      return False
 
   _instrument_refcount[fk] = _instrument_refcount.get(fk, 0) + 1
   return True
@@ -260,10 +264,6 @@ async def subscribe_ws(
     return
 
   client_key = _client_key(inst["symbol"], inst.get("exchange", exchange))
-  if client_key not in _client_subscribers:
-    _client_subscribers[client_key] = set()
-  _client_subscribers[client_key].add(ws)
-
   ok = await _subscribe_upstream(user_id, inst, dhan_creds)
   if not ok:
     await ws.send_text(
@@ -276,6 +276,10 @@ async def subscribe_ws(
       )
     )
     return
+
+  if client_key not in _client_subscribers:
+    _client_subscribers[client_key] = set()
+  _client_subscribers[client_key].add(ws)
 
   if dhan_creds is None and _use_mock():
     _start_mock_if_needed()
