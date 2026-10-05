@@ -78,3 +78,53 @@ def test_webhook_requires_subscription_and_hmac():
         )
         assert ok.status_code == 200
         assert ok.json()["accepted"] is True
+        first_order_id = json.loads(ok.json()["response"])["order_id"]
+
+        retry = client.post(
+            url,
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Gnkalgo-Secret": secret,
+                "X-Gnkalgo-Signature": sig,
+            },
+        )
+        assert retry.status_code == 200
+        retry_body = retry.json()
+        assert retry_body["accepted"] is True
+        retry_response = json.loads(retry_body["response"])
+        assert retry_response["order_id"] == first_order_id
+        assert retry_response.get("idempotent") is True
+
+        orders = client.get("/api/v1/orders/", headers=auth)
+        assert orders.status_code == 200
+        assert len(orders.json()) == 1
+        assert orders.json()[0]["id"] == first_order_id
+
+        other = json.dumps({"symbol": "TCS", "action": "BUY", "qty": 1, "paper_mode": True}).encode()
+        other_sig = hmac.new(secret.encode(), other, hashlib.sha256).hexdigest()
+        second = client.post(
+            url,
+            content=other,
+            headers={
+                "Content-Type": "application/json",
+                "X-Gnkalgo-Secret": secret,
+                "X-Gnkalgo-Signature": other_sig,
+            },
+        )
+        assert second.status_code == 200
+        second_order_id = json.loads(second.json()["response"])["order_id"]
+        assert second_order_id != first_order_id
+        listed = client.get("/api/v1/orders/", headers=auth)
+        assert len(listed.json()) == 2
+
+
+def test_webhook_idempotency_key_is_stable_for_retries():
+    from uuid import UUID
+
+    from app.services.webhook_service import webhook_idempotency_key
+
+    webhook_id = UUID("12345678-1234-5678-1234-567812345678")
+    body = b'{"symbol":"RELIANCE","action":"BUY","qty":1}'
+    assert webhook_idempotency_key(webhook_id, body) == webhook_idempotency_key(webhook_id, body)
+    assert webhook_idempotency_key(webhook_id, body) != webhook_idempotency_key(webhook_id, body + b" ")

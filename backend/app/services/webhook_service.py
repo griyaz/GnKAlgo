@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Request
 from sqlalchemy import select
@@ -8,10 +9,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.security import generate_secure_token, hash_token
-from app.models import User, Webhook, WebhookLog
+from app.models import Order, User, Webhook, WebhookLog
 from app.schemas.trading import InboundWebhookPayload, PlaceOrderRequest, WebhookCreateRequest
 from app.services import billing_service
 from app.services.order_service import order_service
+
+# TradingView and similar senders retry on timeout after the first POST already
+# placed a live order. Identical payloads within this window reuse the order.
+WEBHOOK_RETRY_WINDOW = timedelta(minutes=2)
+
+
+def webhook_idempotency_key(webhook_id, raw_body: bytes) -> str:
+    return hashlib.sha256(str(webhook_id).encode("utf-8") + b"\0" + raw_body).hexdigest()[:32]
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
 class WebhookService:
@@ -58,7 +73,9 @@ class WebhookService:
         raw_secret: str | None,
     ) -> WebhookLog:
         result = await db.execute(
-            select(Webhook).where(Webhook.token == token, Webhook.is_active.is_(True), Webhook.direction == "INBOUND")
+            select(Webhook)
+            .where(Webhook.token == token, Webhook.is_active.is_(True), Webhook.direction == "INBOUND")
+            .with_for_update()
         )
         webhook = result.scalar_one_or_none()
         if not webhook:
@@ -76,6 +93,21 @@ class WebhookService:
         if not user.is_active:
             raise ValueError("Webhook owner inactive")
 
+        idempotency_key = webhook_idempotency_key(webhook.id, raw_body)
+        prior = await self._recent_order(db, webhook.id, idempotency_key)
+        if prior:
+            log = WebhookLog(
+                webhook_id=webhook.id,
+                payload=json.dumps(payload.model_dump()),
+                response=json.dumps(
+                    {"order_id": str(prior.id), "status": prior.status, "idempotent": True}
+                ),
+                status_code=202,
+            )
+            db.add(log)
+            await db.flush()
+            return log
+
         order = await order_service.place_order(
             db,
             user,
@@ -86,6 +118,7 @@ class WebhookService:
                 price=payload.price,
                 paper_mode=payload.paper_mode,
                 broker="paper" if payload.paper_mode else "dhan",
+                correlation_id=idempotency_key,
             ),
             request=request,
             source="webhook",
@@ -100,6 +133,20 @@ class WebhookService:
         db.add(log)
         await db.flush()
         return log
+
+    async def _recent_order(self, db: AsyncSession, webhook_id, idempotency_key: str) -> Order | None:
+        result = await db.execute(
+            select(Order)
+            .where(Order.webhook_id == webhook_id, Order.correlation_id == idempotency_key)
+            .order_by(Order.created_at.desc())
+            .limit(8)
+        )
+        cutoff = datetime.now(timezone.utc) - WEBHOOK_RETRY_WINDOW
+        for order in result.scalars():
+            created = _aware(order.created_at)
+            if created is not None and created >= cutoff:
+                return order
+        return None
 
 
 webhook_service = WebhookService()
